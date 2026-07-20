@@ -1,0 +1,27 @@
+{
+  "name": "kage-gumi-ichikawa",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Ichikawa 市川 — personal recipe to weekly-shopping-list app (kawaii bento), forked out of kage-gumi.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "node server/index.js",
+    "capture": "node engine/capture-hellofresh-session.mjs",
+    "pull": "node engine/pull-box-history.mjs",
+    "enrich": "node engine/enrich-recipes.mjs",
+    "clean": "node engine/backfill-clean.mjs"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "playwright": "^1.48.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.11"
+  }
+}

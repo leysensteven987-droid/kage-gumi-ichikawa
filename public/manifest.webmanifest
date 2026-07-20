@@ -1,0 +1,16 @@
+{
+  "name": "Ichikawa — Market Scout",
+  "short_name": "Ichikawa",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FFF6EA",
+  "theme_color": "#FF9DB2",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ]
+}

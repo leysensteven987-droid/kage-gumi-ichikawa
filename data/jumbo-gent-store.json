@@ -1,0 +1,106 @@
+{
+  "store": "Jumbo Foodmarkt Gent",
+  "source": "https://www.jumbo.com/dam/belgie/winkels/Jumbo-BE-Foodmarkt-Gent-Plattegrond.pdf",
+  "captured": "2026-07-14",
+  "note": "Zone geometry is a clean schematic (viewBox 0 0 1000 640) that preserves the real topology of the store: fresh perimeter top/right, dry-goods grid left, frozen centre, entrance bottom-centre, checkouts bottom-left. Keyword lexicon maps HelloFresh-style Dutch ingredient names to zones; first matching rule (top of walkOrder-independent priority) wins. `priority` = match order (lower = checked first).",
+  "viewBox": [0, 0, 1000, 640],
+  "overrides": [
+    { "contains": "bouillon", "zone": "kruiden-conserven", "why": "bouillon(blokjes) are pantry/soup — must beat the meat prefix in kippen-/runderbouillon" }
+  ],
+  "endpoints": {
+    "ingang": { "label": "INGANG", "emoji": "🚪", "x": 560, "y": 545, "w": 180, "h": 55, "cx": 650, "cy": 572 },
+    "kassa":  { "label": "Kassa's", "emoji": "🛒", "x": 40,  "y": 540, "w": 210, "h": 60, "cx": 145, "cy": 570 }
+  },
+  "walkOrder": [
+    "groente-fruit", "kaas", "charcuterie", "bakkerij", "beenhouwerij", "vis", "veggie",
+    "pasta-rijst", "kruiden-conserven", "wereld-oosters", "zuivel", "ontbijt-beleg",
+    "snoep-noten", "dranken", "non-food", "diepvries", "overig"
+  ],
+  "zones": [
+    {
+      "id": "groente-fruit", "label": "Groente & Fruit", "emoji": "🥬", "accent": "#93CFA0",
+      "x": 430, "y": 250, "w": 250, "h": 150, "cx": 555, "cy": 325, "priority": 20,
+      "keywords": ["ui","rode ui","sjalot","ajuin","look","knoflook","wortel","gele wortel","paarse wortel","tomaat","tomaten","kerstomaat","kerstomaten","pruimtomaat","romatomaat","romatomaten","vleestomaat","kumato","paprika","puntpaprika","paprikareepjes","komkommer","mini-komkommer","courgette","aubergine","spinazie","verse koriander","koriander","vers basilicum","verse basilicum","bladpeterselie","krulpeterselie","peterselie","bieslook","verse dille","dille","verse munt","munt","verse rozemarijn","rozemarijn","verse tijm","verse kurkuma","verse gember","limoen","citroen","sinaasappel","appel","mango","ananas","avocado","broccoli","bimi","broccolirijst","bloemkool","bloemkoolrijst","prei","venkel","paksoi","spitskool","gesneden spitskool","witte kool","rode kool","boerenkool","savooiekool","gesneden snijbonen","snijbonen","sperziebonen","sugarsnaps","peultjes","sojascheuten","radijs","little gem","botersla","botersla","ijsbergsla","romaine","radicchio","rucola","veldsla","mesclun","slamix","botersla","tuinkers","lente-ui","bosui","champignon","champions","koolrabi","meiraap","pastinaak","bleekselderij","bleekselder","aardappel","aardappelen","vastkokende aardappelen","krieltjes","kriel","voorgekookte halve kriel","zoete aardappel","pompoen","pompoenblokjes","jalapeño","rode peper","groene peper","turkse groene peper","citroengras","zeekraal","meiraap","little gem","peultjes","witloof","groentemix","italiaanse groentemix","thais basilicum"]
+    },
+    {
+      "id": "kaas", "label": "Kaas", "emoji": "🧀", "accent": "#FFCE63",
+      "x": 320, "y": 120, "w": 150, "h": 90, "cx": 395, "cy": 165, "priority": 8,
+      "keywords": ["kaas","feta","mozzarella","burrata","parmigiano","parmezaan","pecorino","grana padano","grana padanovlokken","grana","geitenkaas","geitenkaasbolletjes","verse geitenkaas","mascarpone","ricotta","roomkaas","kruidenroomkaas","fresco spalmabile","labne","cheddar","goudse","belegen kaas","grillkaas","witte kaas","witte grillkaas","groenepestokaasblokjes","italiaanse kaas"]
+    },
+    {
+      "id": "charcuterie", "label": "Charcuterie", "emoji": "🥓", "accent": "#D65B78",
+      "x": 490, "y": 120, "w": 170, "h": 90, "cx": 575, "cy": 165, "priority": 4,
+      "keywords": ["serranoham","prosciutto","achterham","salami","chorizo","chorizoblokjes","guanciale","pancetta","spek","spekreepjes","spekblokjes","spekstukjes","ontbijtspek","droge worst"]
+    },
+    {
+      "id": "bakkerij", "label": "Bakkerij & Patisserie", "emoji": "🥐", "accent": "#E8A05B",
+      "x": 680, "y": 40, "w": 280, "h": 80, "cx": 820, "cy": 80, "priority": 3,
+      "keywords": ["brood","stokbrood","ciabatta","baguette","tortilla","mini-tortilla","wrap","naan","pita","pitabrood","broodje","bao","brioche","briochebroodje","hamburgerbroodje","maanzaadbroodje","zuurdesembroodje","tacoschelp","tacoschelpen","pizzadeeg","bladerdeeg","lasagnebladen","croissant","gebak","moelleux"]
+    },
+    {
+      "id": "beenhouwerij", "label": "Vlees / Beenhouwerij", "emoji": "🍗", "accent": "#C0433F",
+      "x": 800, "y": 130, "w": 170, "h": 140, "cx": 885, "cy": 200, "priority": 5,
+      "keywords": ["kip","chicken","butter chicken","kipfilet","kipfilethaasjes","kippendij","kippendijreepjes","kipgehakt","kippenvleugels","kipsaté","kipworst","gekruide kipworst","pulled chicken","kalkoen","kalkoenfilet","rund","rundergehakt","rundersaucijs","biefstuk","biefstukreepjes","gemarineerde biefstukreepjes","steak","gemarineerde steak","varken","varkenshaas","varkensworst","varkensboerenworst","varkensboerengehakt","gehakt","hamburger","meatier-burger","kipburger","oranjehoen","endvogel","saucijs","boerenworst","boerengehakt","gekruid kipgehakt","worst met majoraan"]
+    },
+    {
+      "id": "vis", "label": "Vis & Sushi", "emoji": "🐟", "accent": "#8FD3DE",
+      "x": 800, "y": 290, "w": 170, "h": 110, "cx": 885, "cy": 345, "priority": 1,
+      "keywords": ["garnaal","garnalen","scampi","zalm","zalmfilet","kabeljauw","kabeljauwfilet","pangasius","pangasiusfilet","victoriabaars","victoriabaarsfilet","tonijn","koolvis","vismelange","schepvis","sushi","zeewiersalade","zeewier"]
+    },
+    {
+      "id": "veggie", "label": "Veggie / Vega", "emoji": "🌱", "accent": "#7FB069",
+      "x": 800, "y": 420, "w": 170, "h": 70, "cx": 885, "cy": 455, "priority": 2,
+      "keywords": ["vegetarische slager","vegetarische schnitzel","vegan gehakt","veggie gehakt","plantaardige visburger","visburger","tofu","tofublokjes","falafel","boulettes very chouettes","crispy chic","seitan","tempeh","quorn"]
+    },
+    {
+      "id": "zuivel", "label": "Zuivel & Ei", "emoji": "🥛", "accent": "#BFE0F2",
+      "x": 40, "y": 40, "w": 110, "h": 90, "cx": 95, "cy": 85, "priority": 30,
+      "keywords": ["melk","karnemelk","boter","roomboter","room","culinaire room","kookroom","slagroom","zure room","biologische zure room","yoghurt","volle yoghurt","biologische volle yoghurt","yoghurtdressing","ei","eieren","2 ei"]
+    },
+    {
+      "id": "ontbijt-beleg", "label": "Ontbijt & Broodbeleg", "emoji": "☕", "accent": "#C9A56A",
+      "x": 40, "y": 150, "w": 110, "h": 90, "cx": 95, "cy": 195, "priority": 18,
+      "keywords": ["koffie","thee","ontbijtgranen","muesli","havermout","cornflakes","hagelslag","pindakaas","confituur","bosbessenconfituur","jam","houdbare melk","koffiemelk"]
+    },
+    {
+      "id": "pasta-rijst", "label": "Pasta, Rijst & Noedels", "emoji": "🍝", "accent": "#F0C05A",
+      "x": 170, "y": 40, "w": 130, "h": 90, "cx": 235, "cy": 85, "priority": 10,
+      "keywords": ["pasta","spaghetti","courgette-spaghetti","tagliatelle","verse tagliatelle","linguine","penne","rigatoni","fusilli","volkoren fusilli","macaroni","conchiglie","casarecce","mafaldine","fiocchi","gigli","orzo","volkoren orzo","tortelloni","tortellini","ravioli","gnocchi","rijst","jasmijnrijst","basmatirijst","langgraanrijst","snelkookrijst","bruine snelkookrijst","sushirijst","pandanrijst","risotto","risottorijst","couscous","parelcouscous","volkoren couscous","bulgur","volkoren bulgur","parelgerst","parelgort","quinoa","polenta"]
+    },
+    {
+      "id": "wereld-oosters", "label": "Wereldkeuken & Sauzen", "emoji": "🍜", "accent": "#E86A33",
+      "x": 170, "y": 260, "w": 130, "h": 90, "cx": 235, "cy": 305, "priority": 6,
+      "keywords": ["sojasaus","ketjap","zoete sojasaus","vietnamese saus","vietnamese","hoisin","hoisinsaus","teriyaki","teriyakisaus","sriracha","sriracha-mayo","gochujang","miso","witte miso","currypasta","groene currypasta","currypoeder","currykruiden","gele currykruiden","groene currykruiden","kokosmelk","kokosrasp","vissaus","oestersaus","woksaus","sesamolie","sesamzaad","zwart sesamzaad","gomasio","furikake","ponzu","kimchi","kimchisaus","nasi","bami","nasi-bamikruidenmix","wokpasta","javaanse wokpasta","udon","udonnoedels","noedel","noedels","volkoren noedels","mie noedels","glasnoedels","rijstnoedels","brede rijstnoedels","boekweitnoedels","harissa","hello harissa","zhoug","garam masala","ras el hanout","vijfspecerijenpoeder","citroengras","gedroogde citroengras","tahin","hummus","saté","kipsaté","char siu","char siu pasta","bulgogi","bulgogisaus","koreaanse","koreaanse kruidenmix","chipotle","chipotle-pasta","zoete aziatische saus","zoet-pikante chilisaus","gemberpuree","woksaus met gember","sojabonen","mangochutney","mangoketchup","cranberrychutney","uienchutney","hello umami","hello buon appetito","kimchisaus"]
+    },
+    {
+      "id": "kruiden-conserven", "label": "Kruiden, Olie & Conserven", "emoji": "🧂", "accent": "#B98A4E",
+      "x": 170, "y": 150, "w": 130, "h": 90, "cx": 235, "cy": 195, "priority": 22,
+      "keywords": ["peper en zout","zout","zwarte peper","olijfolie","extra vierge olijfolie","zonnebloemolie","olie","wittewijnazijn","rodewijnazijn","balsamicoazijn","zwarte balsamicoazijn","witte balsamicoazijn","balsamicocrème","azijn","balsamico","groentebouillon","zoutarme groentebouillon","kippenbouillon","runderbouillon","bouillon","bouillonblokje","passata","tomatenpuree","tomatenblokjes","tomatentapenade","tomatenketchup","smokey tomatenketchup","ketchup","barbecuesaus","worcestershiresaus","mosterd","grove mosterd","mayonaise","aioli","ravigotesaus","beurre blanc","honing","suiker","bruine suiker","bloem","maizena","maiszetmeel","maïszetmeel","zetmeel","kikkererwt","kikkererwten","linzen","rode splitlinzen","splitlinzen","boterbonen","kidneybonen","rode kidneybonen","zwarte bonen","witte bonen","mais in blik","maïs","kappertjes","augurk","gesneden augurken","kalamata-olijven","olijven","tapenade","chutney","confituur","pesto","groene pesto","rode pesto","pesto genovese","pesto","basilicumcrème","paprikapoeder","gerookt paprikapoeder","komijn","komijnzaad","kurkuma","gemalen kurkuma","kaneel","gemalen kaneel","nootmuskaat","laurier","laurierblad","gedroogde oregano","oregano","gedroogde tijm","gemalen citroengras","kruidenmix","italiaanse kruiden","siciliaanse kruidenmix","griekse kruidenmix","mexicaanse kruiden","peruaanse kruidenmix","afrikaanse kruidenmix","midden-oosterse kruidenmix","copacabana-stijl kruidenmix","knoflook-kruidenmix","bbq-rub","rub","sumak","piri-pirikruiden","piri-piri","mosterdzaad","geel mosterdzaad","specerijen","panko","paneermeel","panko paneermeel","dadelstukjes","dadel","rozijnen","abrikozenstukjes","tomatenpuree","1 tomatenpuree","gefrituurde uitjes","aardbeiensaus","barbecuesaus"]
+    },
+    {
+      "id": "snoep-noten", "label": "Snoep, Noten & Koek", "emoji": "🍫", "accent": "#8B5A3C",
+      "x": 40, "y": 260, "w": 110, "h": 90, "cx": 95, "cy": 305, "priority": 24,
+      "keywords": ["pinda","pinda's","ongezouten pinda's","gezouten pinda's","cashew","cashewnoten","cashewstukjes","geroosterde cashewnoten","amandel","amandelen","gezouten amandelen","amandelschaafsel","pistache","pistachenoten","pecan","pecanstukjes","walnoot","pijnboompitten","pompoenpitten","maanzaad","chocolade","snoep","koek","tussendoortjes","toastjes","chips"]
+    },
+    {
+      "id": "dranken", "label": "Dranken", "emoji": "🍷", "accent": "#8E3B5B",
+      "x": 40, "y": 370, "w": 110, "h": 110, "cx": 95, "cy": 425, "priority": 26,
+      "keywords": ["wijn","rode wijn","witte wijn","rosé","bubbles","cava","prosecco","bier","speciaal bier","cola","frisdrank","ice-tea","ice tea","water","spuitwater","energiedrank","siroop","siropen","vers sap","sappen","sap","limonade"]
+    },
+    {
+      "id": "non-food", "label": "Non-food & HEMA", "emoji": "🧴", "accent": "#6A9A8A",
+      "x": 170, "y": 370, "w": 130, "h": 110, "cx": 235, "cy": 425, "priority": 28,
+      "keywords": ["reiniger","wasmiddel","luchtverfrisser","verzorging","papierwaren","keukenrol","toiletpapier","dierenvoeding","kattenvoer","hondenvoer","cosmetica","luiers","babyvoeding","kaars","lamp & kaars","aluminiumfolie","vershoudfolie","bakpapier"]
+    },
+    {
+      "id": "diepvries", "label": "Diepvries", "emoji": "❄️", "accent": "#A7C7E7",
+      "x": 330, "y": 430, "w": 170, "h": 90, "cx": 415, "cy": 475, "priority": 27,
+      "keywords": ["diepvries","dunne frieten","frieten","aardappelwedges","aardappelblokjes","aardappelschijfjes","ijs","roomijs","diepvriesgroente","diepvriespizza"]
+    },
+    {
+      "id": "overig", "label": "Overig", "emoji": "❓", "accent": "#B0A79C",
+      "x": 340, "y": 545, "w": 190, "h": 55, "cx": 435, "cy": 572, "priority": 999,
+      "keywords": []
+    }
+  ]
+}

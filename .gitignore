@@ -1,0 +1,10 @@
+node_modules
+dist
+data/recipes/*
+!data/recipes/.gitkeep
+data/.hf-session.json
+data/.hf-creds.json
+data/.hf-browser-profile/
+data/box-history-urls.txt
+.DS_Store
+*.log

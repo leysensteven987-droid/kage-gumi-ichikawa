@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Ichikawa">
+  <!-- rounded-square sakura ground -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="#FF9DB2"/>
+  <!-- soft inner glow -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="#FFB6C6" opacity="0.35"/>
+  <!-- white onigiri (rice ball) -->
+  <path d="M256 132c22 0 40 14 54 40l70 132c14 26 6 52-24 60-30 8-66 12-100 12s-70-4-100-12c-30-8-38-34-24-60l70-132c14-26 32-40 54-40z" fill="#FFFFFF"/>
+  <!-- nori band -->
+  <rect x="196" y="316" width="120" height="64" rx="14" fill="#5B4750"/>
+  <!-- kawaii face -->
+  <circle cx="222" cy="252" r="13" fill="#5B4750"/>
+  <circle cx="290" cy="252" r="13" fill="#5B4750"/>
+  <path d="M240 282q16 16 32 0" stroke="#5B4750" stroke-width="9" stroke-linecap="round" fill="none"/>
+  <!-- cheek blush -->
+  <circle cx="200" cy="272" r="10" fill="#FF9DB2" opacity="0.55"/>
+  <circle cx="312" cy="272" r="10" fill="#FF9DB2" opacity="0.55"/>
+</svg>
