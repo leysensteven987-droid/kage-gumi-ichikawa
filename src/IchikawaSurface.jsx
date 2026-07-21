@@ -1,4 +1,5 @@
 /**
+ * @vibe-author STLE @version 5 @date 21JUL26 @comment Weekrandomizer — "Verras me" vult de hele week (MA–ZO) met 6 willekeurige recepten; het gerecht van dinsdag draait door naar woensdag (1× koken, 2× eten). Weekplan opent van 5 werkdagen naar een volledige 7-daagse week.
  * @vibe-author STLE @version 4 @date 21JUL26 @comment Desktop "management desk" — ≥1100px (ONE JS breakpoint) lays PLAN | BIBLIOTHEEK | SHOP·KOOK side-by-side from the same render pieces; phone composition below the breakpoint unchanged
  * @vibe-author STLE @version 3 @date 21JUL26 @comment Port "De dagronde" into the standalone PWA — rewired onto /api/recipes + self-hosted /fonts + root data/ store JSON
  * @vibe-author STLE @version 2 @date 21JUL26 @comment Redesign — "De dagronde": three-mode companion (献 Plan / 買 Shop / 火 Kook), paw-trail winkelronde, persisted weekplan + checklist, bottom-sheet recipe cards, dual-theme ground
@@ -78,7 +79,18 @@ const R_LG = 26, R_MD = 18, R_SM = 12, R_PILL = 999;
 const F_ROUND   = "'M PLUS Rounded 1c','Baloo 2',ui-rounded,'Segoe UI',system-ui,sans-serif";
 const F_DISPLAY = "'Baloo 2','M PLUS Rounded 1c',ui-rounded,system-ui,sans-serif";
 
-const MAX_DINNERS = 5;
+// The week plans all 7 days (MA–ZO). Six distinct recipes fill the seven day-
+// slots: the "verras me" randomizer cooks Tuesday's dish twice (DI + WO), so a
+// full week is 6 recipes over 7 dinners. Manual planning honours the same cap.
+const MAX_DINNERS = 7;
+
+// Fixed leftover pairing for the randomizer: the recipe placed on DINSDAG (day
+// index 1) is also served WOENSDAG (index 2) — one cook, two dinners. Every
+// other day gets its own recipe. Day indices follow DAY_ABBR (MA=0 … ZO=6).
+const LEFTOVER_FROM = 1; // dinsdag
+const LEFTOVER_TO   = 2; // woensdag
+// pick-index per day slot: MA,DI,WO,DO,VR,ZA,ZO → 6 distinct recipes (DI==WO).
+const RANDOM_DAY_PICKS = [0, 1, 1, 2, 3, 4, 5];
 
 // ONE JS breakpoint — the single place a width lives. Desktop CSS keys off the
 // .kg-ich-desk / .kg-ich--wide classes this sets, never off a second number.
@@ -567,6 +579,38 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     });
   }
 
+  // ── Weekrandomizer — "verras me" ────────────────────────────────────────────
+  // Fills the whole week (MA–ZO) with SIX random distinct recipes: five days get
+  // their own dish, and DINSDAG's dish is repeated WOENSDAG (cook once, eat
+  // twice). That is 6 recipes over 7 dinners. Picks from the live library minus
+  // any card the user soft-removed. With fewer than six recipes available it
+  // fills leading days only (staying dense — no holes to break persistence) and
+  // still doubles DI→WO whenever there are at least two dishes to work with.
+  const shuffleWeek = useCallback(() => {
+    const pool = recipes.filter(r => !removedIds.has(r.id));
+    if (pool.length === 0) {
+      setRemoveNote("Nog geen recepten om uit te kiezen — vul eerst je bibliotheek. 🍙");
+      setTimeout(() => setRemoveNote(null), 3500);
+      return;
+    }
+    // Fisher–Yates over a copy, then take up to six distinct recipes.
+    const bag = pool.slice();
+    for (let i = bag.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [bag[i], bag[j]] = [bag[j], bag[i]];
+    }
+    const pick = bag.slice(0, 6).map(r => r.id);
+    // Lay the picks across the seven day slots (DI==WO). Stop as soon as a slot
+    // would need a recipe we don't have, so the plan array never holds a hole.
+    const week = [];
+    for (const idx of RANDOM_DAY_PICKS) {
+      if (pick[idx] == null) break;
+      week.push(pick[idx]);
+    }
+    setSelected(week);
+    setHeroIdx(null); // let "vanavond" resolve to today again
+  }, [recipes, removedIds]);
+
   // Soft-remove a recipe card: optimistic drop, POST to persist (keep:false on its
   // corpus file), restore + a gentle note if the request fails.
   async function handleRemove(r) {
@@ -730,6 +774,28 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     return (
         <section>
           <SecTag k="献" label="Weekmenu" right={`WEEK ${weekNr} · ${fmtD(weekDays[0])} - ${fmtD(weekDays[6])}`} />
+          {/* weekrandomizer — vult MA–ZO met 6 recepten (DI-gerecht draait door naar WO) */}
+          <button className="kg-ich-btn" onClick={shuffleWeek} disabled={!loaded || recipes.length === 0}
+            aria-label="Verras me — vul de hele week met willekeurige recepten"
+            style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", textAlign: "left",
+              marginBottom: 12, border: "none", borderRadius: R_LG, padding: "12px 15px",
+              background: `linear-gradient(150deg, ${SAKURA}, ${AZUKI})`, color: "#fff",
+              boxShadow: "0 8px 18px rgba(214,91,120,.34)", cursor: (!loaded || recipes.length === 0) ? "not-allowed" : "pointer",
+              opacity: (!loaded || recipes.length === 0) ? 0.55 : 1 }}>
+            <span className="kg-ich-dice" aria-hidden="true" style={{ fontSize: 26, flexShrink: 0 }}>🎲</span>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ display: "block", fontSize: 10.5, fontWeight: 800, letterSpacing: "0.22em", opacity: 0.9 }}>
+                お任せ · VERRAS ME
+              </span>
+              <span style={{ display: "block", fontSize: 14.5, fontWeight: 800, lineHeight: 1.3 }}>
+                Vul mijn week — 6 recepten
+              </span>
+            </span>
+            <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 800, lineHeight: 1.35, textAlign: "right",
+              background: "rgba(255,255,255,.22)", borderRadius: R_MD, padding: "6px 9px" }}>
+              DI + WO<br />zelfde gerecht
+            </span>
+          </button>
           <div className="kg-ich-rail" role="list" aria-label={`Weekmenu met ${selected.length} van ${MAX_DINNERS} geplande diners`}>
             {weekDays.map((d, i) => {
               const isToday = i === todayIdx;
@@ -742,18 +808,6 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
                   <span style={{ fontSize: 11, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{dnum}</span>
                 </span>
               );
-              if (i >= MAX_DINNERS) {
-                /* ZA/ZO — buiten het 5-diner bentoplan */
-                return (
-                  <div key={i} role="listitem" style={{ minHeight: 150, borderRadius: R_MD, border: `2px dashed ${G_LINE}`,
-                    padding: "12px 12px", display: "flex", flexDirection: "column", gap: 8, color: G_MUTED }}>
-                    {dayHead}
-                    <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 700 }}>
-                      vrije avond
-                    </div>
-                  </div>
-                );
-              }
               const id = selected[i];
               const r = id ? byId(id) : null;
               if (!r) {
@@ -775,6 +829,8 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
               const c = catById.get(id) || "veg";
               const cz = cuisineOf(r.cuisine);
               const time = r.totalTime || r.prepTime;
+              // Woensdag serving Dinsdag's dish again → leftovers (1× koken, 2× eten).
+              const isLeftover = i === LEFTOVER_TO && selected[LEFTOVER_FROM] === id;
               return (
                 <article key={i} role="listitem" className="kg-ich-day" onClick={() => setDetail(r)}
                   style={{ position: "relative", minHeight: 150, background: CARD, borderRadius: R_MD, padding: "12px 12px 10px",
@@ -796,6 +852,13 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
                     <span style={{ width: 8, height: 8, borderRadius: "50%", background: CAT_META[c].bar, flexShrink: 0 }} />
                     {CAT_META[c].label}{time ? ` · ${time}′` : ""}
                   </div>
+                  {isLeftover && (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, alignSelf: "flex-start",
+                      fontSize: 9.5, fontWeight: 800, letterSpacing: "0.1em", color: RAMUNE_DP,
+                      background: "#E4F3F5", borderRadius: R_PILL, padding: "3px 8px" }}>
+                      ♻ RESTJE VAN DI
+                    </span>
+                  )}
                   <button className="kg-ich-btn" aria-label={`"${r.title}" uit het weekmenu`}
                     onClick={e => { e.stopPropagation(); removeAt(i); }}
                     style={{ position: "absolute", top: 6, right: 6, width: 24, height: 24, borderRadius: "50%",
@@ -1383,6 +1446,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
         .kg-ich-chip{transition:transform .12s ease, filter .12s ease;cursor:pointer;font-family:inherit;}
         .kg-ich-chip:active{transform:scale(.95);}
         .kg-ich-day{transition:box-shadow .15s ease, transform .15s ease;}
+        .kg-ich-dice{display:inline-block;transition:transform .2s ease;}
         .kg-ich-title{cursor:pointer;transition:color .15s ease;}
         .kg-ich-title:hover{color:${SAKURA_DP};}
         .kg-ich-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
@@ -1434,6 +1498,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
         @media(hover:hover){
           .kg-ich-card:hover,.kg-ich-day:hover{transform:translateY(-2px);}
           .kg-ich-btn:hover{filter:brightness(1.05);}
+          .kg-ich-btn:hover .kg-ich-dice{transform:rotate(-18deg) scale(1.12);}
           .kg-ich-chip:hover{transform:translateY(-1px);}
           .kg-ich-gitem:not(.kg-ich-gitem--on):hover .kg-ich-gnm{color:${SAKURA_DP};}
         }
