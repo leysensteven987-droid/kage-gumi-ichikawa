@@ -12,9 +12,16 @@
 // missing seed degrades to an empty list.
 
 import express from "express";
-import { readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import {
+  BROWSER_UA,
+  findRecipeNode,
+  extractJsonLdNodesFromHtml,
+  normalizeRecipe,
+  mergeWithExisting,
+} from "../engine/lib-recipe.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -73,6 +80,76 @@ app.post("/api/recipes/:id/remove", (req, res) => {
   } catch {
     return res.status(500).json({ error: "failed to remove recipe" });
   }
+});
+
+// Import a recipe from any HTML address: fetch the page, pull its schema.org
+// Recipe JSON-LD, normalize it into the corpus shape, and write it to
+// data/recipes/<id>.json (creating the corpus dir if it's a fresh checkout).
+// Re-importing the same recipe refreshes it in place, preserving human-owned
+// fields (keep, step timings, original addedDate) via mergeWithExisting.
+//
+// Server-side plain fetch only (no headless browser): public recipe pages carry
+// their JSON-LD in the initial HTML. Pages that hide it behind JS or a bot wall
+// return a friendly 422 the UI can show — the batch `npm run enrich` engine keeps
+// the browser fallback for HelloFresh's Datadome challenge.
+app.post("/api/recipes/import", async (req, res) => {
+  const url = typeof req.body?.url === "string" ? req.body.url.trim() : "";
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return res.status(400).json({ error: "Geef een geldige URL op." });
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return res.status(400).json({ error: "Alleen http(s)-adressen kunnen geïmporteerd worden." });
+  }
+
+  let html;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    let r;
+    try {
+      r = await fetch(url, {
+        redirect: "follow",
+        signal: controller.signal,
+        headers: {
+          "User-Agent": BROWSER_UA,
+          Accept: "text/html,application/xhtml+xml",
+          "Accept-Language": "nl-BE,nl;q=0.9,en;q=0.8",
+        },
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!r.ok) return res.status(422).json({ error: `De pagina gaf HTTP ${r.status} terug.` });
+    html = await r.text();
+  } catch (err) {
+    const msg = err?.name === "AbortError" ? "De pagina reageerde te traag." : "De pagina kon niet opgehaald worden.";
+    return res.status(422).json({ error: msg });
+  }
+
+  const node = findRecipeNode(extractJsonLdNodesFromHtml(html));
+  if (!node) {
+    return res.status(422).json({ error: "Geen recept gevonden op deze pagina (geen recept-data ingebed)." });
+  }
+
+  let recipe;
+  try {
+    const fresh = normalizeRecipe(node, url);
+    if (!fresh.id) return res.status(422).json({ error: "Kon geen recept-id afleiden." });
+    const file = path.join(RECIPES_DIR, `${fresh.id}.json`);
+    let existing = null;
+    try { existing = JSON.parse(readFileSync(file, "utf8")); } catch {}
+    recipe = mergeWithExisting(fresh, existing);
+    recipe.keep = true; // a fresh import always un-hides the card
+    mkdirSync(RECIPES_DIR, { recursive: true });
+    writeFileSync(file, JSON.stringify(recipe, null, 2) + "\n");
+  } catch {
+    return res.status(500).json({ error: "Kon het recept niet opslaan." });
+  }
+
+  return res.json({ ok: true, recipe });
 });
 
 // Serve the built UI. Static assets first, then SPA fallback to index.html for any

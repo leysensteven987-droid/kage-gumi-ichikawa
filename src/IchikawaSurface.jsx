@@ -464,7 +464,10 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   const [search, setSearch]     = useState("");    // keyword search
   const [timeMax, setTimeMax]   = useState(null);  // time bucket (minutes, null = Alles)
   const [removedIds, setRemovedIds] = useState(() => new Set()); // soft-removed (optimistic)
-  const [removeNote, setRemoveNote] = useState(null); // gentle failure toast
+  const [toast, setToast]       = useState(null);  // gentle status/failure toast
+  const [importOpen, setImportOpen] = useState(false); // "import from URL" panel open?
+  const [importUrl, setImportUrl]   = useState("");    // pasted recipe address
+  const [importing, setImporting]   = useState(false); // request in flight
   const [heroIdx, setHeroIdx]   = useState(null);  // pinned "vanavond" slot; null = auto
   const libRef  = useRef(null); // scroll target: empty slot / SHOP empty → bibliotheek
   const mainRef = useRef(null); // the mode scroll pane — reset scroll on mode switch
@@ -567,6 +570,15 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     });
   }
 
+  // One gentle bottom toast, shared by remove failures and recipe imports.
+  const toastTimer = useRef(null);
+  const flash = useCallback((msg, ms = 3500) => {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), ms);
+  }, []);
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
+
   // Soft-remove a recipe card: optimistic drop, POST to persist (keep:false on its
   // corpus file), restore + a gentle note if the request fails.
   async function handleRemove(r) {
@@ -576,8 +588,37 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
       if (!res.ok) throw new Error(String(res.status));
     } catch {
       setRemovedIds(prev => { const n = new Set(prev); n.delete(r.id); return n; });
-      setRemoveNote(`Kon "${r.title}" niet verwijderen: kaartje teruggezet.`);
-      setTimeout(() => setRemoveNote(null), 3500);
+      flash(`Kon "${r.title}" niet verwijderen: kaartje teruggezet.`);
+    }
+  }
+
+  // Import a recipe from a pasted HTML address. The server fetches the page, reads
+  // its embedded recipe data and stores it in the corpus; here we splice the result
+  // straight into the library (replacing any same-id card) so it appears at once,
+  // no reload needed. A friendly toast reports success or why it couldn't.
+  async function importFromUrl() {
+    const url = importUrl.trim();
+    if (!url || importing) return;
+    setImporting(true);
+    try {
+      const res = await fetch("/api/recipes/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.recipe) throw new Error(data.error || "Importeren mislukt.");
+      const rec = data.recipe;
+      setRecipes(prev => [rec, ...prev.filter(r => r.id !== rec.id)]);
+      setSource(s => (s === "offline" ? s : "corpus"));
+      setRemovedIds(prev => { const n = new Set(prev); n.delete(rec.id); return n; });
+      setImportUrl("");
+      setImportOpen(false);
+      flash(`"${rec.title}" toegevoegd aan je bibliotheek 🍱`);
+    } catch (err) {
+      flash(err.message || "Importeren mislukt.");
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -866,6 +907,54 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
           <p style={{ fontSize: 13, color: G_MUTED, margin: "0 0 12px", lineHeight: 1.6 }}>
             Kies tot {MAX_DINNERS} diners voor je week (hetzelfde gerecht mag meerdere dagen). 🍱
           </p>
+
+          {/* ── import a recipe from an HTML address ──────────────────────────
+              A link goes in, the scout reads the page's recipe data and drops a
+              new card straight into the library. Collapsed to a pill by default. */}
+          <div style={{ marginBottom: 12 }}>
+            {!importOpen ? (
+              <button className="kg-ich-btn" onClick={() => setImportOpen(true)}
+                style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "#fff",
+                  border: `2px solid ${LINE}`, borderRadius: R_PILL, color: SAKURA_DP, fontSize: 13.5,
+                  fontWeight: 800, minHeight: 44, padding: "10px 16px", boxShadow: SHADOW_SOFT }}>
+                🔗 Recept importeren van een link
+              </button>
+            ) : (
+              <section style={{ background: CARD, borderRadius: R_LG, padding: "14px 16px", boxShadow: SHADOW_SOFT }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                  <span style={{ fontFamily: F_DISPLAY, fontSize: 14.5, fontWeight: 800, color: MATCHA_DP }}>
+                    🔗 Recept importeren
+                  </span>
+                  <button className="kg-ich-btn" onClick={() => { setImportOpen(false); setImportUrl(""); }}
+                    aria-label="importeren sluiten"
+                    style={{ marginLeft: "auto", width: 30, height: 30, borderRadius: "50%", border: "none",
+                      background: "#FFE9EC", color: AZUKI, fontSize: 14, fontWeight: 800, lineHeight: 1 }}>×</button>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <input type="url" inputMode="url" value={importUrl} autoFocus
+                    onChange={e => setImportUrl(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); importFromUrl(); } }}
+                    placeholder="https://…/recept"
+                    disabled={importing}
+                    style={{ flex: "1 1 220px", minWidth: 0, boxSizing: "border-box", background: "#fff",
+                      border: `2px solid ${LINE}`, borderRadius: R_PILL, padding: "11px 16px", minHeight: 48,
+                      fontSize: 15, fontFamily: "inherit", color: INK, boxShadow: SHADOW_SOFT, outline: "none" }} />
+                  <button className="kg-ich-btn" onClick={importFromUrl} disabled={importing || !importUrl.trim()}
+                    style={{ flexShrink: 0, background: importing || !importUrl.trim() ? "#F3E6D6" : SAKURA,
+                      border: "none", borderRadius: R_PILL, color: importing || !importUrl.trim() ? "#C7A98F" : "#fff",
+                      fontSize: 14.5, fontWeight: 800, minHeight: 48, padding: "12px 20px",
+                      boxShadow: importing || !importUrl.trim() ? "none" : SHADOW_SOFT,
+                      cursor: importing || !importUrl.trim() ? "not-allowed" : "pointer" }}>
+                    {importing ? "Bezig…" : "Importeer"}
+                  </button>
+                </div>
+                <p style={{ fontSize: 12, color: INK_SOFT, margin: "9px 2px 0", lineHeight: 1.55 }}>
+                  Plak het adres van een receptpagina (HelloFresh, AH, veel receptsites). De scout leest de
+                  ingrediënten en stappen en zet het recept in je bibliotheek. 🐾
+                </p>
+              </section>
+            )}
+          </div>
 
           {/* keyword search */}
           <div style={{ position: "relative", marginBottom: 12 }}>
@@ -1526,11 +1615,11 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
       )}
 
       {/* ── toast — absolute child of the root (works in both mounts) ── */}
-      {removeNote && (
+      {toast && (
         <div role="status" style={{ position: "absolute", left: 16, right: 16, bottom: 96, zIndex: 90,
           background: "#FFF0E6", color: SAKURA_DP, fontSize: 14, fontWeight: 700, textAlign: "center",
           borderRadius: R_MD, padding: "11px 16px", boxShadow: SHADOW_LIFT, animation: "ichPop .2s ease" }}>
-          {removeNote}
+          {toast}
         </div>
       )}
 

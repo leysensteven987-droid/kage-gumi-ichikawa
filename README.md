@@ -30,6 +30,18 @@ Two ways to run:
 - **One port (built app):** `npm run build`, then `npm run start` — the Express server
   serves the built UI **and** the API together on `http://localhost:5273`.
 
+## Import a recipe from a link
+
+In the app's **BIBLIOTHEEK** (recipe library) there's a **🔗 Recept importeren van een link**
+button: paste the address of any recipe page and the recipe is added to your library. The
+server (`POST /api/recipes/import`) fetches the page, reads its embedded schema.org `Recipe`
+data (JSON-LD — HelloFresh, Albert Heijn and many recipe sites carry it), normalizes it into
+the corpus shape, and writes `data/recipes/<id>.json`. Re-importing the same recipe refreshes
+it in place (keeping any hand-tuned step timings). Pages that hide their recipe data behind
+JavaScript or a bot wall return a friendly error — for HelloFresh's Datadome challenge, use the
+batch `npm run enrich` engine below, which adds a headless-browser fallback. The parsing and
+normalization is shared between the two via `engine/lib-recipe.mjs`.
+
 ## Recipe engine (HelloFresh)
 
 The `engine/` scripts build the personal corpus. HelloFresh Belgium sits behind Datadome,
