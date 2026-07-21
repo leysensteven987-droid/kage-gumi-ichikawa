@@ -56,3 +56,34 @@ pm2 start ecosystem.config.cjs
 ```
 
 Expose it with a Cloudflare Tunnel ingress: `ichikawa.kage-gumi.com → localhost:5273`.
+
+### Auto-deploy (Windows box)
+
+A bare `git pull` is **not** a deploy: the server serves the pre-built `dist/`, so
+without a rebuild + PM2 reload new commits never reach the running app. The box is
+a Windows / PowerShell host, so `scripts/autodeploy.ps1` closes that gap — it
+fetches the deploy branch and, only when new commits arrived, runs `npm ci` (when
+deps changed), `npm run build`, and `pm2 reload`. It is a cheap no-op when nothing
+changed and guards against overlapping runs, so it is safe on a tight schedule.
+
+Register it with Task Scheduler to run every 10 minutes (adjust the clone path):
+
+```powershell
+schtasks /Create /TN "ichikawa-autodeploy" /SC MINUTE /MO 10 /F `
+  /TR "powershell -NoProfile -ExecutionPolicy Bypass -File C:\dev\kage-gumi-ichikawa\scripts\autodeploy.ps1"
+```
+
+Deploy branch and PM2 app name are overridable via `ICHIKAWA_DEPLOY_BRANCH`
+(default `main`) and `ICHIKAWA_PM2_APP` (default `kage-gumi-ichikawa`).
+
+One-time bootstrap on the box (PowerShell — note `&&` is **not** a valid separator
+in Windows PowerShell 5.x, so run the steps on separate lines):
+
+```powershell
+git pull
+npm ci
+npm run build
+pm2 reload kage-gumi-ichikawa
+```
+
+That lands the first build; then register the scheduled task above.

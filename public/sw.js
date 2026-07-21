@@ -1,12 +1,20 @@
 // Ichikawa service worker — small, robust, offline-tolerant.
 //
 // Strategy:
-//   • App shell ("/") → cache-first (built JS/CSS are content-hashed, so a runtime
-//     cache picks them up on first fetch and serves them offline thereafter).
-//   • /api/recipes → network-first (fresh corpus when online, last-known when offline).
+//   • HTML navigations ("/", "/index.html") → NETWORK-FIRST. index.html is the
+//     one un-hashed file, and it names the current content-hashed JS/CSS bundle.
+//     Serving it network-first means a fresh deploy is picked up on the next
+//     launch (falling back to the cached shell only when offline). Cache-first
+//     here would pin an installed PWA to the FIRST index.html it ever saw — and
+//     thus to a stale bundle — forever; that is the bug this replaces.
+//   • Hashed assets (/assets/*, fonts, icons) → cache-first. Their URLs are
+//     immutable, so a new build ships new URLs and never serves stale code.
+//   • /api/recipes → network-first (fresh corpus when online, last-known offline).
 // Any caching failure is swallowed so the app never breaks because of the SW.
-
-const CACHE = "ichikawa-v1";
+//
+// Bump CACHE on every shape change so `activate` purges the previous version's
+// pinned shell from already-installed clients.
+const CACHE = "ichikawa-v2";
 const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -24,6 +32,22 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+// Network-first: fetch fresh, refresh the cache, fall back to the cached copy
+// (or the shell for navigations) when the network is unavailable.
+function networkFirst(req, fallbackPath) {
+  return fetch(req)
+    .then((res) => {
+      if (res && res.ok && res.type === "basic") {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+      }
+      return res;
+    })
+    .catch(() =>
+      caches.match(req).then((r) => r || (fallbackPath ? caches.match(fallbackPath) : Response.error()))
+    );
+}
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
@@ -32,19 +56,18 @@ self.addEventListener("fetch", (event) => {
 
   // API: network-first, fall back to cached copy.
   if (url.pathname.startsWith("/api/recipes")) {
-    event.respondWith(
-      fetch(req)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
-          return res;
-        })
-        .catch(() => caches.match(req).then((r) => r || Response.error()))
-    );
+    event.respondWith(networkFirst(req));
     return;
   }
 
-  // App shell + hashed assets: cache-first, populate the runtime cache on miss.
+  // HTML shell + SPA navigations: network-first so a new deploy is picked up,
+  // cached "/index.html" as the offline fallback.
+  if (req.mode === "navigate" || url.pathname === "/" || url.pathname === "/index.html") {
+    event.respondWith(networkFirst(req, "/index.html"));
+    return;
+  }
+
+  // Content-hashed assets: cache-first, populate the runtime cache on miss.
   event.respondWith(
     caches.match(req).then((cached) => {
       if (cached) return cached;
@@ -56,9 +79,7 @@ self.addEventListener("fetch", (event) => {
           }
           return res;
         })
-        .catch(() =>
-          req.mode === "navigate" ? caches.match("/index.html") : Response.error()
-        );
+        .catch(() => Response.error());
     })
   );
 });
