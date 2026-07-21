@@ -581,6 +581,30 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     }
   }
 
+  // Persist an edited ingredient list (swap / add / remove a line) for one recipe.
+  // Optimistic: patch the in-memory corpus (so the shopping list + card re-render
+  // at once) and the open sheet, then PUT to write the corpus file. On failure we
+  // roll both back to their previous ingredients and rethrow so the sheet can
+  // surface the error and keep the user in edit mode. Quantities are BASE amounts
+  // (per recipe.servings) — the shopping list scales them per the porties setting.
+  const handleSaveIngredients = useCallback(async (id, ingredients) => {
+    const prev = (recipes.find(r => r.id === id) || {}).ingredients || [];
+    setRecipes(rs => rs.map(r => (r.id === id ? { ...r, ingredients } : r)));
+    setDetail(d => (d && d.id === id ? { ...d, ingredients } : d));
+    try {
+      const res = await fetch(`/api/recipes/${encodeURIComponent(id)}/ingredients`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ingredients }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+    } catch (e) {
+      setRecipes(rs => rs.map(r => (r.id === id ? { ...r, ingredients: prev } : r)));
+      setDetail(d => (d && d.id === id ? { ...d, ingredients: prev } : d));
+      throw e;
+    }
+  }, [recipes]);
+
   // ── Aggregated shopping list ──────────────────────────────────────────────
   // For every selected recipe, scale each ingredient by servings/recipe.servings,
   // then dedupe by name+unit (unit-aware). Different units for the same name stay
@@ -1537,7 +1561,8 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
       {/* ── recipe card sheet ── */}
       {detail && <RecipeSheet recipe={detail} servings={servings} count={countOf(detail.id)}
         canAdd={selected.length < MAX_DINNERS} onAdd={() => addToPlan(detail.id)}
-        onRemoveOne={() => removeOneOf(detail.id)} onClose={() => setDetail(null)} />}
+        onRemoveOne={() => removeOneOf(detail.id)} onClose={() => setDetail(null)}
+        onSaveIngredients={handleSaveIngredients} />}
 
       {/* ── store floorplan sheet — shares the persisted ticks with SHOP ── */}
       {showRoute && <RouteSheet items={shoppingList} servings={servings}
@@ -1549,12 +1574,51 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
 // ─── Recipe card sheet — bottom sheet with the full cooking-mode detail ──────
 // position:absolute child of the root (NOT fixed) so it works identically in
 // the desktop takeover and inside MobileShell's visualViewport-sized area.
-function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, onClose }) {
+function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, onClose, onSaveIngredients }) {
+  // Ingredient editing — swap a line out, retune a quantity, or add a new one.
+  // `draft` holds BASE quantities (per r.servings) as strings for controlled
+  // inputs; null means "not editing". Save persists via the parent callback.
+  const [draft, setDraft] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [editErr, setEditErr] = useState("");
+  const editing = draft !== null;
+
   useEffect(() => {
-    const onKey = e => { if (e.key === "Escape") onClose(); };
+    // While editing, Escape cancels the edit instead of closing the whole sheet.
+    const onKey = e => {
+      if (e.key !== "Escape") return;
+      if (draft !== null) { setDraft(null); setEditErr(""); }
+      else onClose();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, draft]);
+
+  const startEdit = () => {
+    setEditErr("");
+    setDraft((r.ingredients || []).map(i => ({
+      name: i.name || "", qty: i.qty == null ? "" : String(i.qty), unit: i.unit || "",
+    })));
+  };
+  const cancelEdit = () => { setDraft(null); setEditErr(""); };
+  const setRow = (i, field, val) => setDraft(d => d.map((row, k) => (k === i ? { ...row, [field]: val } : row)));
+  const removeRow = i => setDraft(d => d.filter((_, k) => k !== i));
+  const addRow = () => setDraft(d => [...d, { name: "", qty: "", unit: "" }]);
+  const saveEdit = async () => {
+    const cleaned = draft
+      .map(row => ({ name: row.name.trim(), qty: row.qty === "" ? null : Number(row.qty), unit: row.unit.trim() }))
+      .filter(row => row.name && (row.qty === null || Number.isFinite(row.qty)));
+    setSaving(true); setEditErr("");
+    try {
+      await onSaveIngredients(r.id, cleaned);
+      setDraft(null);
+    } catch {
+      setEditErr("Opslaan mislukt — probeer opnieuw.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const scale = servings / (r.servings || servings || 1);
   const cz = cuisineOf(r.cuisine);
   const inPlan = count > 0;
@@ -1656,18 +1720,86 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
           </p>
 
           {/* ── INGREDIËNTEN ── */}
-          <div style={{ fontFamily: F_DISPLAY, fontSize: 15, fontWeight: 800, color: MATCHA_DP, marginTop: 2 }}>🧂 Ingrediënten</div>
-          <div>
-            {(r.ingredients || []).map((ing, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 14, color: INK,
-                minHeight: 40, padding: "4px 0", borderBottom: `1px solid ${LINE}` }}>
-                <span style={{ fontWeight: 600 }}>{ing.name}</span>
-                <span style={{ fontWeight: 800, color: SAKURA_DP, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
-                  {fmtQty((Number(ing.qty) || 0) * scale)} {ing.unit}
-                </span>
-              </div>
-            ))}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 2 }}>
+            <div style={{ fontFamily: F_DISPLAY, fontSize: 15, fontWeight: 800, color: MATCHA_DP }}>🧂 Ingrediënten</div>
+            {!editing && (
+              <button className="kg-ich-btn" onClick={startEdit} aria-label="Ingrediënten aanpassen"
+                style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, background: "#FFF0F3", border: "none",
+                  borderRadius: R_PILL, color: SAKURA_DP, fontSize: 12.5, fontWeight: 800, padding: "6px 13px",
+                  boxShadow: SHADOW_SOFT, cursor: "pointer" }}>
+                ✏️ Aanpassen
+              </button>
+            )}
           </div>
+
+          {!editing ? (
+            /* read view — scaled to the porties setting */
+            <div>
+              {(r.ingredients || []).length === 0 && (
+                <div style={{ fontSize: 13.5, color: INK_SOFT, padding: "8px 0" }}>
+                  Nog geen ingrediënten — tik <b style={{ color: SAKURA_DP }}>Aanpassen</b> om ze toe te voegen.
+                </div>
+              )}
+              {(r.ingredients || []).map((ing, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 14, color: INK,
+                  minHeight: 40, padding: "4px 0", borderBottom: `1px solid ${LINE}` }}>
+                  <span style={{ fontWeight: 600 }}>{ing.name}</span>
+                  <span style={{ fontWeight: 800, color: SAKURA_DP, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                    {fmtQty((Number(ing.qty) || 0) * scale)} {ing.unit}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            /* edit view — BASE quantities (per r.servings), not the scaled amounts */
+            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+              <div style={{ fontSize: 12, color: INK_SOFT, fontWeight: 700 }}>
+                Hoeveelheden per {r.servings || servings} porties. In de boodschappenlijst worden ze naar je porties geschaald.
+              </div>
+              {draft.map((row, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input value={row.name} onChange={e => setRow(i, "name", e.target.value)} placeholder="ingrediënt"
+                    aria-label={`Naam ingrediënt ${i + 1}`}
+                    style={{ flex: 1, minWidth: 0, fontFamily: F_ROUND, fontSize: 14, fontWeight: 600, color: INK,
+                      background: RICE, border: `1px solid ${LINE}`, borderRadius: R_SM, padding: "9px 11px" }} />
+                  <input value={row.qty} onChange={e => setRow(i, "qty", e.target.value)} placeholder="0" inputMode="decimal"
+                    aria-label={`Hoeveelheid ${i + 1}`}
+                    style={{ width: 58, fontFamily: F_ROUND, fontSize: 14, fontWeight: 800, color: SAKURA_DP, textAlign: "right",
+                      background: RICE, border: `1px solid ${LINE}`, borderRadius: R_SM, padding: "9px 8px",
+                      fontVariantNumeric: "tabular-nums" }} />
+                  <input value={row.unit} onChange={e => setRow(i, "unit", e.target.value)} placeholder="g"
+                    aria-label={`Eenheid ${i + 1}`}
+                    style={{ width: 62, fontFamily: F_ROUND, fontSize: 13, fontWeight: 700, color: INK,
+                      background: RICE, border: `1px solid ${LINE}`, borderRadius: R_SM, padding: "9px 8px" }} />
+                  <button className="kg-ich-btn" onClick={() => removeRow(i)} aria-label={`Verwijder ${row.name || `ingrediënt ${i + 1}`}`}
+                    style={{ flexShrink: 0, width: 32, height: 32, borderRadius: "50%", border: "none", background: "#FFE9EC",
+                      color: AZUKI, fontSize: 15, fontWeight: 800, lineHeight: 1, cursor: "pointer" }}>×</button>
+                </div>
+              ))}
+              <button className="kg-ich-btn" onClick={addRow}
+                style={{ alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 7, background: "transparent",
+                  border: `2px dashed ${MATCHA}`, borderRadius: R_PILL, color: MATCHA_DP, fontSize: 13.5, fontWeight: 800,
+                  padding: "8px 16px", cursor: "pointer" }}>
+                ＋ Ingrediënt toevoegen
+              </button>
+              {editErr && (
+                <div role="alert" style={{ fontSize: 13, fontWeight: 700, color: AZUKI }}>{editErr}</div>
+              )}
+              <div style={{ display: "flex", gap: 10, marginTop: 2 }}>
+                <button className="kg-ich-btn" onClick={saveEdit} disabled={saving}
+                  style={{ background: MATCHA, border: "none", borderRadius: R_PILL, color: "#fff", fontSize: 14, fontWeight: 800,
+                    padding: "10px 22px", minHeight: 44, boxShadow: SHADOW_SOFT, cursor: saving ? "wait" : "pointer",
+                    opacity: saving ? 0.7 : 1 }}>
+                  {saving ? "Bewaren…" : "Bewaar"}
+                </button>
+                <button className="kg-ich-btn" onClick={cancelEdit} disabled={saving}
+                  style={{ background: "transparent", border: `1px solid ${LINE}`, borderRadius: R_PILL, color: INK_SOFT,
+                    fontSize: 14, fontWeight: 800, padding: "10px 22px", minHeight: 44, cursor: "pointer" }}>
+                  Annuleer
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* sheet footer — add / [− n +] stepper */}
