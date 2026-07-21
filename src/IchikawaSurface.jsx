@@ -1,3 +1,8 @@
+/**
+ * @vibe-author STLE @version 4 @date 21JUL26 @comment Desktop "management desk" — ≥1100px (ONE JS breakpoint) lays PLAN | BIBLIOTHEEK | SHOP·KOOK side-by-side from the same render pieces; phone composition below the breakpoint unchanged
+ * @vibe-author STLE @version 3 @date 21JUL26 @comment Port "De dagronde" into the standalone PWA — rewired onto /api/recipes + self-hosted /fonts + root data/ store JSON
+ * @vibe-author STLE @version 2 @date 21JUL26 @comment Redesign — "De dagronde": three-mode companion (献 Plan / 買 Shop / 火 Kook), paw-trail winkelronde, persisted weekplan + checklist, bottom-sheet recipe cards, dual-theme ground
+ */
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import STORE from "../data/jumbo-gent-store.json";
 import { buildRoute } from "./lib/jumboRoute.js";
@@ -5,32 +10,47 @@ import { buildRoute } from "./lib/jumboRoute.js";
 /* ──────────────────────────────────────────────────────────────────────────
    ICHIKAWA · 市川 · MARKET SCOUT   (kage-gumi personal operative)
 
-   A fully RE-SKINNED surface that lives inside the kage-gumi runtime but reads
-   as its own product — a KAWAII BENTO RESTAURANT (light, cute, fluffy). The
-   dark "Shadow Crew Protocol" KG chrome is dropped entirely; reached at
-   #ichikawa (never shown in the professional KG showcase).
+   "DE DAGRONDE" — a phone-first, one-thumb kitchen companion. The surface is
+   organised around the three real jobs, each its own MODE (persisted):
 
-     • RECEPTEN     — a soft/rounded Recipe Library grid (Dutch / Belgian
-                      HelloFresh style) with pastel food-photo placeholders.
-     • WEEKPLAN     — the weekly plan IS a dark-lacquer bento tray: pick up to 5
-                      dinners to fill the compartments → an aggregated shopping
-                      list assembles itself (unit-aware dedupe, scaled to a
-                      servings target, default 2).
-     • COOKING MODE — the recipe detail is time-oriented: a total-time split bar
-                      (hands-on active = sakura vs waiting passive = ramune), a
-                      per-phase step timeline (pink = active, blue = passive) and
-                      a parallel-work tip. Renders from real per-phase step data.
+     • 献 PLAN — couch job. Week bento rail (7 days, snap-scroll), porties +
+                 eiwitbalans summary, and the recipe library as big tap rows
+                 (search / soort / tijd / tag filters kept).
+     • 買 SHOP — standing-in-the-aisle job. The walk-ordered checklist with
+                 52px whole-row taps, and the SIGNATURE paw-print trail: the
+                 cat scout's route INGANG → aisles → KASSA. A completed aisle
+                 earns a paw stamp. Floorplan modal kept.
+     • 火 KOOK — at-the-stove job. Tonight's dish: act/wait split, mise en
+                 place, and the per-phase step timeline inline.
 
-   Mascots (Onigiri-chan / Ichikawa the cat scout / Tamago-chan / Matcha-kun)
-   are inline SVG stickers tied to app states (empty / added / loading).
+   The weekly plan, servings, checklist ticks and mode PERSIST in localStorage
+   (kg-ich-*) — a grocery tool must survive a reload in the aisle.
 
-   Data comes from GET /api/ichikawa/recipes; the committed seed corpus is the
-   offline fallback so the shell always renders. Engine (HelloFresh pull, photo→
-   recipe, store pricing) is Phase 2+ — this file is surface + seed only.
+   ≥1100px — the "MANAGEMENT DESK" (desktop is for PLANNING the dagronde, the
+   phone for executing it). ONE JS breakpoint (WIDE_MQ) flips the shell: the
+   SAME section renderers rearrange into three columns — 献 PLAN (week board +
+   porties + stats) | 皿 BIBLIOTHEEK (curation, card grid, '/' focuses search)
+   | a 買 SHOP / 火 KOOK side panel (S / K keys). Nothing is duplicated: below
+   the breakpoint the phone composition renders exactly as before, and all
+   state/persistence/API wiring is shared. Sheets become centered modals on
+   the desk; hover lifts are gated behind @media(hover:hover).
 
-   KG-authored: root carries data-kg-* attribution; children use kg-ich-* classes.
-   Fonts: M PLUS Rounded 1c + Baloo 2, loaded via Google Fonts @import — the same
-   mechanism KG already uses for DM Sans / Noto Serif JP.
+   Mount: this surface IS the standalone app — main.jsx renders it bare, so
+   `embedded` defaults false → position:fixed full-viewport takeover. Passing
+   `embedded` switches the root to position:absolute for hosting inside a
+   visualViewport-sized shell (avoids the iOS fixed/large-viewport trap).
+   Sheets/toasts are position:absolute children of the root for the same reason.
+
+   The page GROUND + text directly on it read the --kg-* veil tokens when a
+   host theme defines them; standalone (no host vars) they fall back to the
+   kawaii cream ground. The cream cards are fixed, self-consistent pastel
+   islands (cream bg + plum ink) either way. NB hard rule: never `var(--x)55`
+   hex-alpha on a var — alpha only via color-mix. Data comes from
+   GET /api/recipes (the standalone Express server); the tiny inline fallback
+   set keeps the shell rendering when the API is unreachable.
+
+   KG-authored: root carries data-kg-* attribution; children use kg-ich-*.
+   Fonts: M PLUS Rounded 1c + Baloo 2, self-hosted from /fonts (offline PWA).
    ────────────────────────────────────────────────────────────────────────── */
 
 // ─── Kawaii bento palette (from the approved style tile — used exactly) ──────
@@ -41,7 +61,7 @@ const INK       = "#5B4750";  // warm plum-brown — never pure black
 const INK_SOFT  = "#9A8189";
 const SAKURA    = "#FF9DB2";  // primary
 const SAKURA_DP = "#F26D8B";
-const MATCHA    = "#93CFA0";  // secondary (the old lime, kawaii-fied)
+const MATCHA    = "#93CFA0";  // secondary
 const MATCHA_DP = "#5FAE77";
 const TAMAGO    = "#FFCE63";
 const RAMUNE    = "#8FD3DE";  // passive / cool
@@ -60,6 +80,10 @@ const F_DISPLAY = "'Baloo 2','M PLUS Rounded 1c',ui-rounded,system-ui,sans-serif
 
 const MAX_DINNERS = 5;
 
+// ONE JS breakpoint — the single place a width lives. Desktop CSS keys off the
+// .kg-ich-desk / .kg-ich--wide classes this sets, never off a second number.
+const WIDE_MQ = "(min-width: 1100px)";
+
 // Cuisine → food-tile glyph + PASTEL gradient. Self-contained (no external
 // images) so the surface renders identically offline on the box.
 const CUISINE = {
@@ -71,14 +95,6 @@ const CUISINE = {
   "Vegetarisch":    { emoji: "🥗", a: "#E4F3D9", b: "#CBEBD2" },
 };
 const cuisineOf = c => CUISINE[c] || { emoji: "🍽️", a: "#FFE7C2", b: "#FFD3DE" };
-
-// Pastel tag-chip styles, cycled by index.
-const CHIP_STYLES = [
-  { bg: "#FFF0E6", fg: SAKURA_DP },
-  { bg: "#E9F6EC", fg: MATCHA_DP },
-  { bg: "#E6F5F7", fg: RAMUNE_DP },
-  { bg: "#FFF5DE", fg: "#C58A16" },
-];
 
 // Time-filter buckets (totalTime, minutes). "Alles" = no filter (max:null); a recipe
 // with no totalTime only ever shows there, never under a numeric bucket.
@@ -151,19 +167,19 @@ const CATEGORY_FILTERS = [
   { key: "veg",     label: "Vega",  emoji: "🥗" },
 ];
 
-// ─── Theme-aware ground tokens (layout-2.0 port) ────────────────────────────
+// ─── Theme-aware ground tokens ──────────────────────────────────────────────
 // The kawaii brand stays: cards, chips and accents are fixed pastel islands
 // that are self-consistent (cream bg + plum ink) in either theme. Only the
-// page GROUND and the text sitting DIRECTLY on it follow the KG theme tokens,
-// so the surface stays legible in both dark and light. NB hard rule: never
-// `var(--x)55` hex-alpha on a var — alpha only via color-mix.
+// page GROUND and the text sitting DIRECTLY on it follow the KG veil tokens,
+// so the surface stays legible on graphite (dim) and washi (light). NB hard
+// rule: never `var(--x)55` hex-alpha on a var — alpha only via color-mix.
 const G_BG    = `var(--kg-bg-page, ${RICE})`;
 const G_TEXT  = `var(--kg-text-body, ${INK})`;
 const G_MUTED = `var(--kg-text-muted, ${INK_SOFT})`;
 const G_LINE  = `var(--kg-border, ${LINE})`;
 const G_DOTS  = `color-mix(in srgb, var(--kg-border, ${LINE}) 60%, transparent)`;
 
-// ─── Week helpers — tonight-hero + 7-day weekmenu strip ─────────────────────
+// ─── Week helpers — tonight-hero + 7-day weekmenu rail ──────────────────────
 const DAY_ABBR = ["MA", "DI", "WO", "DO", "VR", "ZA", "ZO"];
 const DAY_FULL = ["MAANDAG", "DINSDAG", "WOENSDAG", "DONDERDAG", "VRIJDAG", "ZATERDAG", "ZONDAG"];
 const MON_ABBR = ["JAN", "FEB", "MRT", "APR", "MEI", "JUN", "JUL", "AUG", "SEP", "OKT", "NOV", "DEC"];
@@ -196,18 +212,18 @@ const CAT_META = {
   veg:     { label: "VEGA",  bar: MATCHA, fg: MATCHA_DP },
 };
 
-// Section heading — the mockup's "sec-tag" pattern (label + fading rule +
-// right-hand stamp), kawaii-skinned. `onCard`: inside a cream card use fixed
-// kawaii ink; on the themed page ground use KG tokens so both themes read.
+// Section heading — label + fading rule + right-hand stamp, kawaii-skinned.
+// `onCard`: inside a cream card use fixed kawaii ink; on the themed page ground
+// use KG tokens so both themes read.
 function SecTag({ k, label, right, onCard = false }) {
   const muted = onCard ? INK_SOFT : G_MUTED;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 14, margin: "0 0 16px" }}>
-      <span style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: "0.22em", textTransform: "uppercase", color: SAKURA_DP, whiteSpace: "nowrap" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "0 0 12px" }}>
+      <span style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: "0.2em", textTransform: "uppercase", color: SAKURA_DP, whiteSpace: "nowrap" }}>
         {k} {label}
       </span>
       <span aria-hidden="true" style={{ flex: 1, height: 2, borderRadius: 2, background: `linear-gradient(90deg, ${BLUSH}, transparent)` }} />
-      {right ? <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: "0.14em", color: muted, whiteSpace: "nowrap" }}>{right}</span> : null}
+      {right ? <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.12em", color: muted, whiteSpace: "nowrap" }}>{right}</span> : null}
     </div>
   );
 }
@@ -248,8 +264,36 @@ function cookTiming(r) {
 
 const API_GET = (p) => fetch(p).then(r => (r.ok ? r.json() : Promise.reject(r.status)));
 
-// ─── Mascots — inline SVG sticker set (genuinely cute: dot eyes, blush, smile).
-//     Each is tied to an app state; all self-contained, no external assets. ──
+// ─── Persistence — the plan must survive a reload in the aisle ──────────────
+const LS = {
+  plan:     "kg-ich-plan",
+  servings: "kg-ich-servings",
+  checked:  "kg-ich-checked",
+  mode:     "kg-ich-mode",
+  deskSide: "kg-ich-desk-side", // desktop-only: which job the side panel shows
+};
+function lsRead(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null) return fallback;
+    const v = JSON.parse(raw);
+    return v == null ? fallback : v;
+  } catch { return fallback; }
+}
+function lsWrite(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch {} }
+
+// The three modes — each maps to one real job (couch / aisle / stove).
+const MODES = [
+  { id: "plan", k: "献", label: "Plan" },
+  { id: "shop", k: "買", label: "Shop" },
+  { id: "cook", k: "火", label: "Kook" },
+];
+
+// Grocery-line identity: name + unit (unit-aware dedupe key, also the tick key).
+const keyOf = it => `${it.name}__${it.unit || ""}`;
+
+// ─── Mascots — inline SVG sticker set (dot eyes, blush, smile). Each tied to
+//     an app state; all self-contained, no external assets. ─────────────────
 function Mascot({ type, size = 68, bob = true, style }) {
   const face = (
     <g>
@@ -307,8 +351,35 @@ function Mascot({ type, size = 68, bob = true, style }) {
   );
 }
 
-// Offline fallback — a tiny subset so the surface is never blank if kg-api is
-// unreachable. The full committed corpus is served by GET /api/ichikawa/recipes.
+// The scout's paw print — trail markers + the "aisle complete" stamp.
+function Paw({ size = 16, color = SAKURA_DP, style, className }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" className={className} style={style}>
+      <circle cx="5.6" cy="9.4" r="2.6" fill={color} />
+      <circle cx="12"  cy="6.6" r="2.9" fill={color} />
+      <circle cx="18.4" cy="9.4" r="2.6" fill={color} />
+      <path d="M12 11.2 C8.3 11.2 5.6 14 5.6 16.6 C5.6 18.9 7.4 20.4 9.4 19.9 C10.4 19.65 11.2 19.4 12 19.4 C12.8 19.4 13.6 19.65 14.6 19.9 C16.6 20.4 18.4 18.9 18.4 16.6 C18.4 14 15.7 11.2 12 11.2 Z" fill={color} />
+    </svg>
+  );
+}
+
+// Bento-cell meter — 5 lacquer compartments filling with sakura as diners land.
+function BentoMeter({ filled, total = MAX_DINNERS, cell = 20 }) {
+  return (
+    <div role="img" aria-label={`${filled} van ${total} diners gepland`}
+      style={{ display: "flex", gap: 5, padding: 5, background: LACQUER, borderRadius: 10 }}>
+      {Array.from({ length: total }, (_, i) => (
+        <span key={i} style={{ width: cell, height: cell, borderRadius: 6,
+          background: i < filled ? SAKURA : "#5C4A52",
+          boxShadow: i < filled ? "inset 0 -3px 0 rgba(0,0,0,.12)" : "inset 0 2px 3px rgba(0,0,0,.28)",
+          transition: "background .25s ease" }} />
+      ))}
+    </div>
+  );
+}
+
+// Offline fallback — a tiny subset so the surface is never blank if the API is
+// unreachable. The full corpus is served by GET /api/recipes.
 const FALLBACK_RECIPES = [
   { id: "fb-bolognese", source: "own", title: "Spaghetti Bolognese", subtitle: "Klassieke rundersaus met Parmigiano",
     servings: 2, cuisine: "Italiaans", prepTime: 30, totalTime: 30, activeTime: 16, tags: ["pasta", "rund"], image: "",
@@ -342,26 +413,83 @@ const FALLBACK_RECIPES = [
     ] },
 ];
 
-export default function IchikawaSurface({ onExit }) {
+export default function IchikawaSurface({ onExit, embedded = false }) {
   const [recipes, setRecipes] = useState([]);
-  const [source, setSource]   = useState("");   // 'corpus' | 'seed' | 'empty'
+  const [source, setSource]   = useState("");   // 'corpus' | 'seed' | 'empty' | 'offline'
   const [loaded, setLoaded]   = useState(false);
-  const [selected, setSelected] = useState([]); // recipe ids in the weekly plan (order = pick order)
-  const [servings, setServings] = useState(2);  // scaling target (default 2)
-  const [detail, setDetail]     = useState(null); // recipe open in the detail modal
-  const [showRoute, setShowRoute] = useState(false); // Jumbo Gent looproute modal open?
-  const [tag, setTag]           = useState("all"); // library filter (recipe tags)
-  const [cat, setCat]           = useState("all"); // main-ingredient filter (meat/fish/veg…)
-  const [search, setSearch]     = useState("");    // keyword search — title/subtitle/tags/cuisine/ingredients
-  const [timeMax, setTimeMax]   = useState(null);  // active time-filter bucket (minutes, null = "Alles")
-  const [removedIds, setRemovedIds] = useState(() => new Set()); // soft-removed this session (optimistic)
-  const [removeNote, setRemoveNote] = useState(null); // gentle failure note when a remove doesn't stick
-  const [heroIdx, setHeroIdx]   = useState(null); // pinned "vanavond" slot; null = auto (today's slot, else first)
-  const [aisleChecked, setAisleChecked] = useState(() => new Set()); // inline grocery ticks, key = name__unit
-  const libRef = useRef(null); // scroll target: empty weekmenu slot → receptenbibliotheek
 
-  // Load the corpus. API first; committed seed as the offline fallback so the
-  // shell is never empty even if kg-api is down.
+  // ── Persisted state (kg-ich-*) — mode, weekplan, porties, checklist ticks.
+  // Defensive parses: a corrupt/legacy value falls back instead of crashing.
+  const [mode, setMode] = useState(() => {
+    const m = lsRead(LS.mode, "plan");
+    return MODES.some(x => x.id === m) ? m : "plan";
+  });
+  const [selected, setSelected] = useState(() => {
+    const v = lsRead(LS.plan, []);
+    return Array.isArray(v) ? v.filter(x => typeof x === "string").slice(0, MAX_DINNERS) : [];
+  });
+  const [servings, setServings] = useState(() => {
+    const v = Number(lsRead(LS.servings, 2));
+    return Number.isFinite(v) && v >= 1 && v <= 12 ? Math.round(v) : 2;
+  });
+  const [aisleChecked, setAisleChecked] = useState(() => {
+    const v = lsRead(LS.checked, []);
+    return new Set(Array.isArray(v) ? v.filter(x => typeof x === "string") : []);
+  });
+  useEffect(() => { lsWrite(LS.mode, mode); }, [mode]);
+  useEffect(() => { lsWrite(LS.plan, selected); }, [selected]);
+  useEffect(() => { lsWrite(LS.servings, servings); }, [servings]);
+  useEffect(() => { lsWrite(LS.checked, [...aisleChecked]); }, [aisleChecked]);
+
+  // ── Desktop desk — ONE JS breakpoint. Below it the phone shell renders
+  // exactly as before; above it the same pieces rearrange into three columns.
+  const [wide, setWide] = useState(() =>
+    typeof window !== "undefined" && !!window.matchMedia && window.matchMedia(WIDE_MQ).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(WIDE_MQ);
+    const on = e => setWide(e.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  // Which job the desk's right panel shows (shop | cook) — persisted under its
+  // OWN key so the phone's persisted `mode` is never disturbed by desktop use.
+  const [deskSide, setDeskSide] = useState(() => (lsRead(LS.deskSide, "shop") === "cook" ? "cook" : "shop"));
+  useEffect(() => { lsWrite(LS.deskSide, deskSide); }, [deskSide]);
+
+  // ── Session state (not persisted)
+  const [detail, setDetail]     = useState(null);  // recipe open in the card sheet
+  const [showRoute, setShowRoute] = useState(false); // floorplan sheet open?
+  const [tag, setTag]           = useState("all"); // library filter (recipe tags)
+  const [cat, setCat]           = useState("all"); // main-ingredient filter
+  const [search, setSearch]     = useState("");    // keyword search
+  const [timeMax, setTimeMax]   = useState(null);  // time bucket (minutes, null = Alles)
+  const [removedIds, setRemovedIds] = useState(() => new Set()); // soft-removed (optimistic)
+  const [removeNote, setRemoveNote] = useState(null); // gentle failure toast
+  const [heroIdx, setHeroIdx]   = useState(null);  // pinned "vanavond" slot; null = auto
+  const libRef  = useRef(null); // scroll target: empty slot / SHOP empty → bibliotheek
+  const mainRef = useRef(null); // the mode scroll pane — reset scroll on mode switch
+  const searchRef = useRef(null); // desktop '/': focus the library search
+
+  // Desktop-only keyboard: '/' focuses search, S / K flips the side panel.
+  // Attached only when wide, so the phone gets zero new listeners.
+  useEffect(() => {
+    if (!wide) return;
+    const onKey = e => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target;
+      const tag = ((t && t.tagName) || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || (t && t.isContentEditable)) return;
+      if (e.key === "/") { e.preventDefault(); if (searchRef.current) searchRef.current.focus(); }
+      else if (e.key === "s" || e.key === "S") setDeskSide("shop");
+      else if (e.key === "k" || e.key === "K") setDeskSide("cook");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [wide]);
+
+  // Load the corpus. API first (server falls back corpus → seed itself); the
+  // inline set is the last resort so the shell is never blank even if the
+  // server is down (source 'offline' = error state).
   useEffect(() => {
     let alive = true;
     API_GET("/api/recipes")
@@ -370,6 +498,20 @@ export default function IchikawaSurface({ onExit }) {
       .finally(() => { if (alive) setLoaded(true); });
     return () => { alive = false; };
   }, []);
+
+  // Each mode is its own page — start it at the top.
+  useEffect(() => { if (mainRef.current) mainRef.current.scrollTop = 0; }, [mode]);
+
+  // Prune persisted plan entries whose recipe no longer exists — but ONLY against
+  // the real corpus. The 2-recipe offline fallback would false-positive and wipe
+  // a valid saved plan, so an offline boot keeps the plan untouched.
+  useEffect(() => {
+    if (!loaded || source === "offline" || !recipes.length) return;
+    setSelected(prev => {
+      const next = prev.filter(id => recipes.some(r => r.id === id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [loaded, source, recipes]);
 
   const byId = useCallback(id => recipes.find(r => r.id === id), [recipes]);
 
@@ -387,7 +529,7 @@ export default function IchikawaSurface({ onExit }) {
     return ["all", ...[...s].sort()];
   }, [recipes]);
 
-  // Visible library list: not removed → category → tag → keyword search → time bucket (all AND).
+  // Visible library list: not removed → category → tag → keyword → time (all AND).
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
     return recipes.filter(r => {
@@ -408,11 +550,11 @@ export default function IchikawaSurface({ onExit }) {
   }, [recipes, removedIds, cat, catById, tag, search, timeMax]);
 
   // The weekly plan is a LIST, not a set — the same dish may fill several
-  // compartments (cook the same dinner two days). Order = pick order = compartment.
+  // compartments (cook the same dinner two days). Order = pick order = day slot.
   const countOf = useCallback(id => selected.filter(x => x === id).length, [selected]);
 
   function addToPlan(id) {
-    setSelected(prev => (prev.length >= MAX_DINNERS ? prev : [...prev, id])); // cap at 5 dinners total
+    setSelected(prev => (prev.length >= MAX_DINNERS ? prev : [...prev, id])); // cap at 5 dinners
   }
   // Remove ONE instance — the exact compartment (by index) or the last-added of an id.
   function removeAt(index) {
@@ -439,7 +581,7 @@ export default function IchikawaSurface({ onExit }) {
     }
   }
 
-  // ── Aggregated shopping list ────────────────────────────────────────────────
+  // ── Aggregated shopping list ──────────────────────────────────────────────
   // For every selected recipe, scale each ingredient by servings/recipe.servings,
   // then dedupe by name+unit (unit-aware). Different units for the same name stay
   // as separate lines. Sorted alphabetically by name.
@@ -468,16 +610,17 @@ export default function IchikawaSurface({ onExit }) {
     return [...acc.values()].sort((a, b) => a.name.localeCompare(b.name, "nl"));
   }, [selected, servings, byId]);
 
-  // Walk-ordered route over the CURRENT list — powers the inline aisled grocery
-  // checklist + the winkelroute chip strip (same engine as the floorplan modal).
+  // Walk-ordered route over the CURRENT list — powers the SHOP checklist, the
+  // paw-print trail and the floorplan sheet (one shared engine).
   const route = useMemo(() => buildRoute(shoppingList, STORE), [shoppingList]);
   const toggleAisle = useCallback(key => {
     setAisleChecked(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
   }, []);
   const checkedCount = useMemo(
-    () => shoppingList.filter(it => aisleChecked.has(`${it.name}__${it.unit}`)).length,
+    () => shoppingList.filter(it => aisleChecked.has(keyOf(it))).length,
     [shoppingList, aisleChecked]
   );
+  const allDone = shoppingList.length > 0 && checkedCount === shoppingList.length;
 
   // Week frame (MA..ZO of the current week) + the "vanavond" hero slot.
   // Slot i of the plan = weekday i (MA..VR); hero = today's slot if filled,
@@ -488,7 +631,7 @@ export default function IchikawaSurface({ onExit }) {
   const heroRecipe = hIdx >= 0 ? byId(selected[hIdx]) : null;
   const heroT = heroRecipe ? cookTiming(heroRecipe) : null;
 
-  // Aggregate week stats for the hero side panel (times + eiwitbalans).
+  // Aggregate week stats for the PLAN summary (times + eiwitbalans).
   const weekStats = useMemo(() => {
     let total = 0, active = 0;
     const cats = { meat: 0, chicken: 0, fish: 0, veg: 0 };
@@ -502,9 +645,686 @@ export default function IchikawaSurface({ onExit }) {
     return { total, active, cats };
   }, [selected, byId, catById]);
 
+  // Cross-mode jump: SHOP/KOOK empty states send you to the PLAN bibliotheek.
+  const goPlanLibrary = useCallback(() => {
+    setMode("plan");
+    setTimeout(() => { libRef.current && libRef.current.scrollIntoView({ behavior: "smooth", block: "start" }); }, 80);
+  }, []);
+
+  const PANE = { maxWidth: 560, margin: "0 auto", padding: "18px 16px 30px",
+    display: "flex", flexDirection: "column", gap: 18, animation: "ichFade .3s ease" };
+  // Desk column inner pane — same rhythm as PANE, but the column IS the width.
+  const DESK_PANE = { padding: "18px 18px 30px",
+    display: "flex", flexDirection: "column", gap: 18, animation: "ichFade .3s ease" };
+
+  const loadingCard = (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, padding: "56px 0", color: G_MUTED }}>
+      <Mascot type="matcha" size={78} />
+      <span style={{ fontSize: 15, fontWeight: 700 }}>Matcha-kun haalt de recepten op…</span>
+    </div>
+  );
+
+  /* ═══════════════════ 献 PLAN — the couch job ═══════════════════
+     Split into named pieces so the phone page (stacked, unchanged order) and
+     the desktop desk (three columns) compose the SAME JSX — one source each. */
+  function renderOffline() {
+    if (source !== "offline") return null;
+    return (
+          <div role="status" style={{ background: "#FFF5DE", color: "#C58A16", fontSize: 13, fontWeight: 700,
+            borderRadius: R_MD, padding: "10px 14px", boxShadow: SHADOW_SOFT, lineHeight: 1.55 }}>
+            📡 Offline — de bibliotheek is niet bereikbaar, je ziet een mini-set. Je weekplan en vinkjes blijven bewaard.
+          </div>
+    );
+  }
+
+  // vanavond shortcut → 火 KOOK (on the desk it also flips the side panel)
+  function renderTonight() {
+    if (!heroRecipe || !heroT) return null;
+    return (
+          <button className="kg-ich-btn" onClick={() => { setMode("cook"); setDeskSide("cook"); }}
+            style={{ display: "flex", alignItems: "center", gap: 12, textAlign: "left", width: "100%",
+              background: CARD, border: "none", borderRadius: R_LG, padding: "12px 14px", boxShadow: SHADOW_SOFT }}>
+            <span style={{ fontSize: 27, flexShrink: 0 }}>{cuisineOf(heroRecipe.cuisine).emoji}</span>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ display: "block", fontSize: 10.5, fontWeight: 800, letterSpacing: "0.24em", color: SAKURA_DP }}>
+                今夜 · VANAVOND
+              </span>
+              <span className="kg-ich-clamp1" style={{ display: "block", fontSize: 14.5, fontWeight: 800, color: INK, lineHeight: 1.35 }}>
+                {heroRecipe.title}
+              </span>
+            </span>
+            <span style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 800, color: "#fff", background: SAKURA,
+              borderRadius: R_PILL, padding: "8px 13px", whiteSpace: "nowrap", boxShadow: "0 6px 14px rgba(242,109,139,.3)" }}>
+              🔥 Kook · {heroT.total}′
+            </span>
+          </button>
+    );
+  }
+
+  // week bento rail — 7 days; phone: snap-scroll strip, desk: vertical board
+  function renderWeekRail() {
+    return (
+        <section>
+          <SecTag k="献" label="Weekmenu" right={`WEEK ${weekNr} · ${fmtD(weekDays[0])} - ${fmtD(weekDays[6])}`} />
+          <div className="kg-ich-rail" role="list" aria-label={`Weekmenu met ${selected.length} van ${MAX_DINNERS} geplande diners`}>
+            {weekDays.map((d, i) => {
+              const isToday = i === todayIdx;
+              const dnum = String(d.getDate()).padStart(2, "0");
+              const dayHead = (
+                <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.16em", color: isToday ? SAKURA_DP : undefined }}>
+                    {DAY_ABBR[i]}{isToday ? " · VANDAAG" : ""}
+                  </span>
+                  <span style={{ fontSize: 11, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{dnum}</span>
+                </span>
+              );
+              if (i >= MAX_DINNERS) {
+                /* ZA/ZO — buiten het 5-diner bentoplan */
+                return (
+                  <div key={i} role="listitem" style={{ minHeight: 150, borderRadius: R_MD, border: `2px dashed ${G_LINE}`,
+                    padding: "12px 12px", display: "flex", flexDirection: "column", gap: 8, color: G_MUTED }}>
+                    {dayHead}
+                    <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 700 }}>
+                      vrije avond
+                    </div>
+                  </div>
+                );
+              }
+              const id = selected[i];
+              const r = id ? byId(id) : null;
+              if (!r) {
+                const firstEmpty = i === selected.length; // the next slot to fill
+                return (
+                  <button key={i} role="listitem" className="kg-ich-btn"
+                    onClick={() => libRef.current && libRef.current.scrollIntoView({ behavior: "smooth", block: "start" })}
+                    style={{ minHeight: 150, borderRadius: R_MD, border: `2px dashed ${firstEmpty ? SAKURA : G_LINE}`,
+                      background: "transparent", padding: "12px 12px", display: "flex", flexDirection: "column", gap: 8,
+                      color: firstEmpty ? SAKURA_DP : G_MUTED, textAlign: "left" }}>
+                    {dayHead}
+                    <span style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, width: "100%" }}>
+                      <span style={{ fontSize: 22, lineHeight: 1 }}>＋</span>
+                      <span style={{ fontSize: 12.5, fontWeight: 700 }}>{firstEmpty ? "kies een gerecht" : "leeg"}</span>
+                    </span>
+                  </button>
+                );
+              }
+              const c = catById.get(id) || "veg";
+              const cz = cuisineOf(r.cuisine);
+              const time = r.totalTime || r.prepTime;
+              return (
+                <article key={i} role="listitem" className="kg-ich-day" onClick={() => setDetail(r)}
+                  style={{ position: "relative", minHeight: 150, background: CARD, borderRadius: R_MD, padding: "12px 12px 10px",
+                    display: "flex", flexDirection: "column", gap: 7, cursor: "pointer",
+                    boxShadow: i === hIdx ? `0 0 0 3px ${SAKURA}, ${SHADOW_SOFT}` : SHADOW_SOFT }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingRight: 20, color: "#C7A98F" }}>
+                    <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.16em", color: isToday ? SAKURA_DP : INK_SOFT }}>
+                      {DAY_ABBR[i]}{isToday ? " · VANDAAG" : ""}
+                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{dnum}</span>
+                  </div>
+                  <div className="kg-ich-clamp" style={{ fontSize: 13.5, fontWeight: 800, color: INK, lineHeight: 1.3, flex: "0 0 auto" }}>
+                    {cz.emoji} {r.title}
+                  </div>
+                  <div className="kg-ich-clamp" style={{ fontSize: 11.5, color: INK_SOFT, lineHeight: 1.5, flex: 1 }}>
+                    {(r.ingredients || []).slice(0, 3).map(x => (x.name || "").toLowerCase()).join(" · ")}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, fontWeight: 800, letterSpacing: "0.14em", color: CAT_META[c].fg }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: CAT_META[c].bar, flexShrink: 0 }} />
+                    {CAT_META[c].label}{time ? ` · ${time}′` : ""}
+                  </div>
+                  <button className="kg-ich-btn" aria-label={`"${r.title}" uit het weekmenu`}
+                    onClick={e => { e.stopPropagation(); removeAt(i); }}
+                    style={{ position: "absolute", top: 6, right: 6, width: 24, height: 24, borderRadius: "50%",
+                      border: "none", background: "#FFE9EC", color: AZUKI, fontSize: 14, lineHeight: 1,
+                      fontWeight: 800, boxShadow: "0 2px 5px rgba(214,91,120,.28)" }}>×</button>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+    );
+  }
+
+  // porties + bento meter + leegmaken
+  function renderPorties() {
+    return (
+        <section style={{ background: CARD, borderRadius: R_LG, padding: "13px 16px", boxShadow: SHADOW_SOFT,
+          display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13.5, color: INK_SOFT, fontWeight: 800 }}>Porties</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <button className="kg-ich-btn" aria-label="minder porties" onClick={() => setServings(s => Math.max(1, s - 1))}
+              style={{ width: 36, height: 36, borderRadius: "50%", border: "none", background: MATCHA, color: "#fff",
+                fontSize: 19, fontWeight: 800, boxShadow: SHADOW_SOFT, lineHeight: 1 }}>–</button>
+            <span style={{ fontSize: 18, fontWeight: 800, minWidth: "1.6ch", textAlign: "center", color: INK,
+              fontVariantNumeric: "tabular-nums" }}>{servings}</span>
+            <button className="kg-ich-btn" aria-label="meer porties" onClick={() => setServings(s => Math.min(12, s + 1))}
+              style={{ width: 36, height: 36, borderRadius: "50%", border: "none", background: MATCHA, color: "#fff",
+                fontSize: 19, fontWeight: 800, boxShadow: SHADOW_SOFT, lineHeight: 1 }}>+</button>
+          </div>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+            <BentoMeter filled={selected.length} cell={15} />
+            {selected.length > 0 && (
+              <button className="kg-ich-btn" onClick={() => setSelected([])}
+                style={{ background: "#fff", border: `2px solid ${LINE}`, borderRadius: R_PILL,
+                  color: INK_SOFT, fontSize: 12.5, fontWeight: 800, padding: "8px 12px" }}>
+                Leegmaken
+              </button>
+            )}
+          </div>
+        </section>
+    );
+  }
+
+  // week stats + eiwitbalans
+  function renderWeekStats() {
+    if (selected.length === 0) return null;
+    return (
+          <section style={{ background: RICE2, borderRadius: R_LG, padding: "16px 18px", boxShadow: SHADOW_SOFT }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.24em", textTransform: "uppercase", color: MATCHA_DP }}>均 · Deze week</span>
+              <Mascot type="tamago" size={30} bob={false} style={{ marginLeft: "auto", marginTop: -4 }} />
+            </div>
+            {[
+              ["DINERS", `${selected.length} / ${MAX_DINNERS}`],
+              ["KOOKTIJD TOTAAL", fmtDur(weekStats.total)],
+              ["HANDS-ON", fmtDur(weekStats.active)],
+              ["BOODSCHAPPEN", `${shoppingList.length} items`],
+            ].map(([l, v]) => (
+              <div key={l} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${LINE}` }}>
+                <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.16em", color: INK_SOFT }}>{l}</span>
+                <span style={{ fontSize: 15, fontWeight: 800, color: INK, fontVariantNumeric: "tabular-nums" }}>{v}</span>
+              </div>
+            ))}
+            <div style={{ marginTop: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.16em", color: INK_SOFT }}>EIWITBALANS</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: INK_SOFT }}>{selected.length} {selected.length === 1 ? "avond" : "avonden"}</span>
+              </div>
+              <div style={{ display: "flex", height: 9, borderRadius: R_PILL, overflow: "hidden", background: "#F3E6D6", marginTop: 8 }}>
+                {["meat", "chicken", "fish", "veg"].map(k => weekStats.cats[k] > 0 && (
+                  <span key={k} style={{ flex: weekStats.cats[k], background: CAT_META[k].bar }} />
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 9 }}>
+                {["meat", "chicken", "fish", "veg"].map(k => (
+                  <span key={k} style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.12em", color: CAT_META[k].fg, display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: CAT_META[k].bar }} />
+                    {CAT_META[k].label} {weekStats.cats[k]}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </section>
+    );
+  }
+
+  // receptenbibliotheek — big tap rows + de bewaarde filters
+  function renderLibrary() {
+    return (
+        <section ref={libRef} style={{ scrollMarginTop: 12 }}>
+          <SecTag k="皿" label="Bibliotheek" right={loaded ? `${shown.length} RECEPTEN` : "LADEN…"} />
+          <p style={{ fontSize: 13, color: G_MUTED, margin: "0 0 12px", lineHeight: 1.6 }}>
+            Kies tot {MAX_DINNERS} diners voor je week (hetzelfde gerecht mag meerdere dagen). 🍱
+          </p>
+
+          {/* keyword search */}
+          <div style={{ position: "relative", marginBottom: 12 }}>
+            <span aria-hidden="true" style={{ position: "absolute", left: 16, top: "50%",
+              transform: "translateY(-50%)", fontSize: 15, pointerEvents: "none" }}>🔍</span>
+            <input type="text" className="kg-ich-search-input" ref={searchRef} value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Zoek op naam, ingrediënt of tag…" />
+            {search && (
+              <button className="kg-ich-btn" onClick={() => setSearch("")} aria-label="zoekopdracht wissen"
+                style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
+                  width: 34, height: 34, borderRadius: "50%", border: "none", background: "transparent",
+                  color: INK_SOFT, fontSize: 15, lineHeight: 1 }}>
+                ✕
+              </button>
+            )}
+          </div>
+
+          {/* soort (main-ingredient) chips */}
+          <div className="kg-ich-chiprow" role="group" aria-label="filter op soort">
+            {CATEGORY_FILTERS.map(c => {
+              const on = cat === c.key;
+              return (
+                <button key={c.key} className="kg-ich-chip" onClick={() => setCat(c.key)} aria-pressed={on}
+                  style={{ background: on ? SAKURA : "#fff", border: "none", borderRadius: R_PILL,
+                    color: on ? "#fff" : INK_SOFT, fontSize: 13.5, fontWeight: 800, padding: "9px 15px",
+                    whiteSpace: "nowrap", flexShrink: 0,
+                    boxShadow: on ? "0 6px 14px rgba(242,109,139,.30)" : SHADOW_SOFT }}>
+                  {c.emoji ? `${c.emoji} ${c.label}` : c.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* tijd chips */}
+          <div className="kg-ich-chiprow" role="group" aria-label="filter op bereidingstijd">
+            <span style={{ fontSize: 12.5, fontWeight: 800, color: G_MUTED, alignSelf: "center", flexShrink: 0 }}>⏱</span>
+            {TIME_BUCKETS.map(b => {
+              const on = timeMax === b.max;
+              return (
+                <button key={b.key} className="kg-ich-chip" onClick={() => setTimeMax(b.max)} aria-pressed={on}
+                  style={{ background: on ? MATCHA : "#fff", border: "none", borderRadius: R_PILL,
+                    color: on ? "#fff" : INK_SOFT, fontSize: 13.5, fontWeight: 800, padding: "9px 15px",
+                    whiteSpace: "nowrap", flexShrink: 0,
+                    boxShadow: on ? "0 6px 14px rgba(95,174,119,.30)" : SHADOW_SOFT }}>
+                  {b.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* tag chips */}
+          {tags.length > 1 && (
+            <div className="kg-ich-chiprow" role="group" aria-label="filter op tag" style={{ marginBottom: 10 }}>
+              {tags.map(t => {
+                const on = tag === t;
+                return (
+                  <button key={t} className="kg-ich-chip" onClick={() => setTag(t)} aria-pressed={on}
+                    style={{ background: on ? SAKURA : "#fff", border: "none", borderRadius: R_PILL,
+                      color: on ? "#fff" : INK_SOFT, fontSize: 13.5, fontWeight: 800, padding: "9px 15px",
+                      whiteSpace: "nowrap", flexShrink: 0,
+                      boxShadow: on ? "0 6px 14px rgba(242,109,139,.30)" : SHADOW_SOFT }}>
+                    {t === "all" ? "Alle" : t}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {!loaded && loadingCard}
+          {loaded && shown.length === 0 && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "48px 0", color: G_MUTED }}>
+              <Mascot type="onigiri" size={72} bob={false} />
+              <span style={{ fontSize: 15, fontWeight: 700 }}>Geen recepten gevonden 🍙</span>
+            </div>
+          )}
+
+          {/* recipe rows — whole row taps; + / stepper on the thumb side.
+              (.kg-ich-lib-list: the desk regrids this into recipe cards) */}
+          <div className="kg-ich-lib-list" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {loaded && shown.map(r => {
+              const count  = countOf(r.id);
+              const inPlan = count > 0;
+              const full   = selected.length >= MAX_DINNERS;
+              const cz     = cuisineOf(r.cuisine);
+              const time   = r.totalTime || r.prepTime;
+              const c      = catById.get(r.id) || "veg";
+              return (
+                <article key={r.id} className="kg-ich-card"
+                  style={{ display: "flex", alignItems: "center", gap: 12, background: CARD, borderRadius: R_LG,
+                    padding: "10px 12px", minHeight: 78,
+                    boxShadow: inPlan ? `0 0 0 3px ${SAKURA}, ${SHADOW_SOFT}` : SHADOW_SOFT }}>
+                  {/* thumb — real photo falls back to the pastel emoji tile */}
+                  <div onClick={() => setDetail(r)} style={{ position: "relative", width: 58, height: 58, flexShrink: 0,
+                    borderRadius: R_MD, overflow: "hidden", cursor: "pointer",
+                    background: `linear-gradient(150deg, ${cz.a}, ${cz.b})`,
+                    display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <span style={{ fontSize: 30 }}>{cz.emoji}</span>
+                    {r.image && (
+                      <img src={r.image} alt="" loading="lazy"
+                        onError={e => { e.currentTarget.style.display = "none"; }}
+                        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+                    )}
+                  </div>
+                  {/* title + meta — taps open the recipe sheet */}
+                  <div onClick={() => setDetail(r)} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
+                    <div className="kg-ich-clamp kg-ich-title" style={{ fontFamily: F_DISPLAY, fontSize: 14.5, fontWeight: 800, color: INK, lineHeight: 1.3 }}>
+                      {r.title}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, fontWeight: 800,
+                      letterSpacing: "0.12em", marginTop: 4, color: CAT_META[c].fg }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: CAT_META[c].bar, flexShrink: 0 }} />
+                      {CAT_META[c].label}{time ? ` · ⏱ ${time}′` : ""}
+                    </div>
+                  </div>
+                  {/* controls: + (or [− n +]) with the library-remove ghost under it */}
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                    {inPlan ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, background: SAKURA,
+                        borderRadius: R_PILL, padding: "4px 6px", boxShadow: SHADOW_SOFT }}>
+                        <button className="kg-ich-btn" onClick={() => removeOneOf(r.id)}
+                          title="Eén dag minder" aria-label={`Eén "${r.title}" uit bento`}
+                          style={{ width: 30, height: 30, borderRadius: "50%", border: "none", background: "rgba(255,255,255,.9)",
+                            color: AZUKI, fontSize: 18, fontWeight: 800, lineHeight: 1, cursor: "pointer" }}>–</button>
+                        <span style={{ minWidth: "1.2ch", textAlign: "center", color: "#fff", fontSize: 14, fontWeight: 800,
+                          fontVariantNumeric: "tabular-nums" }}>{count}</span>
+                        <button className="kg-ich-btn" onClick={() => addToPlan(r.id)} disabled={full}
+                          title={full ? `Max ${MAX_DINNERS} diners` : "Nog een dag"} aria-label={`Nog een "${r.title}" in bento`}
+                          style={{ width: 30, height: 30, borderRadius: "50%", border: "none",
+                            background: full ? "rgba(255,255,255,.5)" : "rgba(255,255,255,.9)",
+                            color: full ? "#D8907F" : SAKURA_DP, fontSize: 18, fontWeight: 800, lineHeight: 1,
+                            cursor: full ? "not-allowed" : "pointer" }}>+</button>
+                      </div>
+                    ) : (
+                      <button className="kg-ich-btn" onClick={() => addToPlan(r.id)} disabled={full}
+                        title={full ? `Max ${MAX_DINNERS} diners` : "In m'n bento"} aria-label={`"${r.title}" in m'n bento`}
+                        style={{ width: 44, height: 44, borderRadius: "50%",
+                          border: "none", background: "#fff",
+                          color: full ? "#D8C4B0" : SAKURA_DP, fontSize: 22, lineHeight: 1, fontWeight: 800,
+                          boxShadow: SHADOW_SOFT, cursor: full ? "not-allowed" : "pointer", opacity: full ? 0.6 : 1 }}>
+                        +
+                      </button>
+                    )}
+                    <button className="kg-ich-btn" onClick={() => handleRemove(r)}
+                      title="Uit de bibliotheek" aria-label={`"${r.title}" verwijderen uit de bibliotheek`}
+                      style={{ width: 24, height: 24, borderRadius: "50%", border: "none",
+                        background: "#FFE9EC", color: AZUKI, fontSize: 12, fontWeight: 800, lineHeight: 1,
+                        opacity: 0.65, boxShadow: "0 2px 5px rgba(214,91,120,.2)" }}>×</button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+    );
+  }
+
+  // The phone PLAN page — the pieces stacked exactly as before.
+  function renderPlan() {
+    return (
+      <div style={PANE}>
+        {renderOffline()}
+        {renderTonight()}
+        {renderWeekRail()}
+        {renderPorties()}
+        {renderWeekStats()}
+        {renderLibrary()}
+      </div>
+    );
+  }
+
+  /* ═══════════════════ 買 SHOP — the aisle job ═══════════════════ */
+  function renderShop() {
+    const total = shoppingList.length;
+    return (
+      <div style={PANE}>
+        <SecTag k="買" label="Boodschappen" right={total ? `${checkedCount} / ${total} BINNEN` : "JUMBO GENT"} />
+        {!loaded ? loadingCard : total === 0 ? (
+          <div style={{ background: CARD, borderRadius: R_LG, padding: "36px 20px", boxShadow: SHADOW_SOFT,
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 12, textAlign: "center", color: INK_SOFT }}>
+            <Mascot type="cat" size={72} />
+            <span style={{ fontSize: 14.5, fontWeight: 700, lineHeight: 1.6, maxWidth: "34ch" }}>
+              Je lijst is nog leeg. Vul eerst het weekmenu, dan sorteert de scout je boodschappen per gang. 🐾
+            </span>
+            <button className="kg-ich-btn" onClick={goPlanLibrary}
+              style={{ background: SAKURA, border: "none", borderRadius: R_PILL, color: "#fff",
+                fontSize: 14.5, fontWeight: 800, minHeight: 48, padding: "12px 22px", boxShadow: SHADOW_SOFT }}>
+              献 Naar je weekplan
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* paw-print trail — the scout's route; a done aisle earns a stamp */}
+            <section style={{ background: CARD, borderRadius: R_LG, padding: "14px 12px 10px", boxShadow: SHADOW_SOFT }}>
+              <div className="kg-ich-trail" role="list" aria-label="Looproute door de winkel">
+                <span role="listitem" style={{ flexShrink: 0, fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", color: INK_SOFT,
+                  border: `2px dashed ${LINE}`, borderRadius: R_PILL, padding: "6px 11px", whiteSpace: "nowrap" }}>🚪 INGANG</span>
+                {route.stops.map((s, i) => {
+                  const done = s.items.every(it => aisleChecked.has(keyOf(it)));
+                  return (
+                    <span key={s.zone.id} role="listitem" style={{ display: "inline-flex", alignItems: "center", gap: 7, flexShrink: 0 }}>
+                      <Paw size={12} color={done ? SAKURA_DP : "#E4CDB6"} />
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 800,
+                        letterSpacing: "0.05em", whiteSpace: "nowrap", borderRadius: R_PILL, padding: "6px 11px",
+                        color: done ? "#fff" : INK, background: done ? MATCHA_DP : RICE,
+                        boxShadow: done ? "0 5px 12px rgba(95,174,119,.34)" : SHADOW_SOFT }}>
+                        <span style={{ color: done ? "rgba(255,255,255,.85)" : MATCHA_DP, fontVariantNumeric: "tabular-nums" }}>
+                          {String(i + 1).padStart(2, "0")}
+                        </span>
+                        {s.zone.emoji} {s.zone.label}
+                        {done && <Paw size={13} color="#fff" className="kg-ich-stamp" />}
+                      </span>
+                    </span>
+                  );
+                })}
+                <Paw size={12} color={allDone ? SAKURA_DP : "#E4CDB6"} style={{ flexShrink: 0 }} />
+                <span role="listitem" style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 6,
+                  fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", whiteSpace: "nowrap",
+                  color: allDone ? "#fff" : INK_SOFT, background: allDone ? SAKURA : "transparent",
+                  border: allDone ? "2px solid transparent" : `2px dashed ${LINE}`,
+                  borderRadius: R_PILL, padding: "6px 11px" }}>
+                  🛒 KASSA{allDone ? " 🎉" : ""}
+                </span>
+              </div>
+              <p style={{ fontSize: 12, color: INK_SOFT, margin: "8px 4px 4px", lineHeight: 1.55 }}>
+                Gesorteerd op looprichting: vers eerst, diepvries als laatste. Eén rondje, geen teruglopen.
+              </p>
+              <button className="kg-ich-btn" onClick={() => setShowRoute(true)}
+                style={{ width: "100%", marginTop: 6, background: `linear-gradient(150deg, ${SAKURA}, ${AZUKI})`,
+                  color: "#fff", border: "none", borderRadius: R_PILL, fontSize: 14.5, fontWeight: 800,
+                  minHeight: 48, padding: "12px 20px", boxShadow: "0 8px 18px rgba(214,91,120,.34)" }}>
+                🗺️ Bekijk plattegrond · Jumbo Gent
+              </button>
+            </section>
+
+            {/* walk-ordered checklist — 52px whole-row taps */}
+            <section style={{ background: CARD, borderRadius: R_LG, padding: "16px 16px 12px", boxShadow: SHADOW_SOFT }}>
+              {route.stops.map((s, i) => {
+                const done = s.items.every(it => aisleChecked.has(keyOf(it)));
+                return (
+                  <div key={s.zone.id} style={{ marginBottom: i < route.stops.length - 1 ? 14 : 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 2 }}>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: MATCHA_DP, fontVariantNumeric: "tabular-nums" }}>{String(i + 1).padStart(2, "0")}</span>
+                      <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: "0.16em", textTransform: "uppercase", color: done ? MATCHA_DP : INK_SOFT }}>
+                        {s.zone.emoji} {s.zone.label}
+                      </span>
+                      <span aria-hidden="true" style={{ flex: 1, height: 2, borderRadius: 2, background: `linear-gradient(90deg, ${LINE}, transparent)` }} />
+                      {done
+                        ? <Paw size={15} color={SAKURA_DP} className="kg-ich-stamp" />
+                        : <span style={{ fontSize: 11.5, fontWeight: 800, color: "#C7A98F", fontVariantNumeric: "tabular-nums" }}>{s.items.length}×</span>}
+                    </div>
+                    {s.items.map((it, j) => {
+                      const key = keyOf(it);
+                      const on = aisleChecked.has(key);
+                      return (
+                        <label key={`${key}_${j}`} className={`kg-ich-gitem${on ? " kg-ich-gitem--on" : ""}`}>
+                          <input type="checkbox" checked={on} onChange={() => toggleAisle(key)} />
+                          <span className="kg-ich-gnm">{it.name}</span>
+                          {it.days && it.days.length > 0 && (
+                            <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.12em", color: "#C58A16",
+                              background: "#FFF5DE", borderRadius: R_PILL, padding: "2px 7px", whiteSpace: "nowrap" }}>
+                              {it.days.map(dd => DAY_ABBR[dd] || "").filter(Boolean).join("·")}
+                            </span>
+                          )}
+                          {it.qty ? (
+                            <span style={{ fontSize: 13.5, fontWeight: 800, color: SAKURA_DP, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                              {fmtQty(it.qty)} {it.unit}
+                            </span>
+                          ) : null}
+                        </label>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+                marginTop: 14, paddingTop: 12, borderTop: `1px solid ${LINE}` }}>
+                <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.18em", color: INK_SOFT }}>
+                  WEEKLIJST · {servings}P · JUMBO GENT
+                </span>
+                <span style={{ fontSize: 14, fontWeight: 800, color: INK, fontVariantNumeric: "tabular-nums" }}>{checkedCount} / {total}</span>
+              </div>
+              <p style={{ fontSize: 12, color: INK_SOFT, margin: "8px 0 4px", lineHeight: 1.55 }}>
+                Samengevoegd per ingrediënt (eenheid-bewust), geschaald naar {servings} porties. Vinkjes blijven bewaard — ook na een herlaad in de gang.
+              </p>
+              {checkedCount > 0 && (
+                <button className="kg-ich-btn" onClick={() => setAisleChecked(new Set())}
+                  style={{ width: "100%", marginTop: 6, background: "#fff", border: `2px solid ${LINE}`, borderRadius: R_PILL,
+                    color: INK_SOFT, fontSize: 13.5, fontWeight: 800, minHeight: 44, padding: "10px 18px" }}>
+                  🐾 Nieuwe ronde — vinkjes wissen
+                </button>
+              )}
+            </section>
+
+            {allDone && (
+              <div style={{ background: CARD, borderRadius: R_LG, padding: "22px 20px", boxShadow: SHADOW_SOFT,
+                display: "flex", alignItems: "center", gap: 14, animation: "ichPop .25s ease" }}>
+                <Mascot type="cat" size={58} />
+                <div>
+                  <div style={{ fontFamily: F_DISPLAY, fontSize: 16, fontWeight: 800, color: MATCHA_DP }}>Ronde klaar! 🎉</div>
+                  <div style={{ fontSize: 13, color: INK_SOFT, lineHeight: 1.55 }}>Alles binnen — de scout stempelt je kaart af en wandelt mee naar de kassa.</div>
+                </div>
+                <Paw size={26} color={SAKURA_DP} className="kg-ich-stamp" style={{ marginLeft: "auto", flexShrink: 0 }} />
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  /* ═══════════════════ 火 KOOK — the stove job ═══════════════════ */
+  function renderKook() {
+    if (!loaded) return <div style={PANE}><SecTag k="火" label="Kookmodus" />{loadingCard}</div>;
+    if (!heroRecipe || !heroT) {
+      return (
+        <div style={PANE}>
+          <SecTag k="火" label="Kookmodus" />
+          <div style={{ background: CARD, borderRadius: R_LG, padding: "36px 20px", boxShadow: SHADOW_SOFT,
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 12, textAlign: "center", color: INK_SOFT }}>
+            <Mascot type="onigiri" size={72} />
+            <span style={{ fontSize: 14.5, fontWeight: 700, lineHeight: 1.6, maxWidth: "34ch" }}>
+              Nog geen diner gepland. Kies eerst een gerecht, dan staat het recept hier voor je klaar.
+            </span>
+            <button className="kg-ich-btn" onClick={goPlanLibrary}
+              style={{ background: SAKURA, border: "none", borderRadius: R_PILL, color: "#fff",
+                fontSize: 14.5, fontWeight: 800, minHeight: 48, padding: "12px 22px", boxShadow: SHADOW_SOFT }}>
+              献 Naar je weekplan
+            </button>
+          </div>
+        </div>
+      );
+    }
+    const scale = servings / (heroRecipe.servings || servings || 1);
+    return (
+      <div style={PANE}>
+        {/* tonight hero — facts + act/wait split */}
+        <section style={{ position: "relative", background: CARD, borderRadius: R_LG, padding: "18px 18px 20px",
+          boxShadow: SHADOW_SOFT, overflow: "hidden" }}>
+          <span aria-hidden="true" style={{ position: "absolute", right: 8, top: -6, fontSize: 76, opacity: 0.13, pointerEvents: "none" }}>
+            {cuisineOf(heroRecipe.cuisine).emoji}
+          </span>
+          <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: "0.26em", textTransform: "uppercase", color: SAKURA_DP, marginBottom: 8 }}>
+            今夜 · {hIdx === todayIdx ? "Wat eten we vanavond" : "Gepland"} · {DAY_FULL[hIdx]} {fmtD(weekDays[hIdx])}
+          </div>
+          <h2 className="kg-ich-title" onClick={() => setDetail(heroRecipe)}
+            style={{ fontFamily: F_DISPLAY, fontSize: 22, fontWeight: 800, color: INK, lineHeight: 1.25, margin: "0 0 6px" }}>
+            {heroRecipe.title}
+          </h2>
+          {heroRecipe.subtitle && (
+            <p style={{ fontSize: 13.5, color: INK_SOFT, lineHeight: 1.6, margin: "0 0 14px" }}>{heroRecipe.subtitle}</p>
+          )}
+          {/* facts row */}
+          <div style={{ display: "flex", gap: 22, flexWrap: "wrap", marginBottom: 16 }}>
+            {[
+              [`${heroT.total}′`, "TOTAAL"],
+              [`${heroT.active}′`, "HANDS-ON"],
+              [String(servings), "PORTIES"],
+              [String((heroRecipe.ingredients || []).length), "INGREDIËNTEN"],
+            ].map(([v, l]) => (
+              <div key={l}>
+                <div style={{ fontFamily: F_DISPLAY, fontSize: 21, fontWeight: 800, color: INK, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{v}</div>
+                <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.18em", color: INK_SOFT, marginTop: 3 }}>{l}</div>
+              </div>
+            ))}
+          </div>
+          {/* actief vs wachten split bar */}
+          <div role="img" aria-label={`${heroT.active} minuten actief, ${heroT.passive} minuten wachten`}
+            style={{ display: "flex", gap: 3, height: 12, borderRadius: R_PILL, overflow: "hidden" }}>
+            <span style={{ flex: heroT.active || 1, background: SAKURA }} />
+            {heroT.passive > 0 && <span style={{ flex: heroT.passive, background: RAMUNE }} />}
+          </div>
+          <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 11.5, fontWeight: 800, letterSpacing: "0.1em" }}>
+            <span style={{ color: SAKURA_DP }}>
+              <span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 3, background: SAKURA, marginRight: 6, verticalAlign: "-1px" }} />
+              ACTIEF {heroT.active}′
+            </span>
+            <span style={{ color: RAMUNE_DP }}>
+              <span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 3, background: RAMUNE, marginRight: 6, verticalAlign: "-1px" }} />
+              WACHTEN {heroT.passive}′
+            </span>
+          </div>
+          {heroT.tip && (
+            <p style={{ margin: "13px 0 0", fontSize: 13, lineHeight: 1.6, color: INK_SOFT, borderLeft: `3px solid ${RAMUNE}`, paddingLeft: 12 }}>
+              💡 {heroT.tip}
+            </p>
+          )}
+          <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+            <button className="kg-ich-btn" onClick={() => setDetail(heroRecipe)}
+              style={{ background: SAKURA, border: "none", borderRadius: R_PILL, color: "#fff",
+                fontSize: 14, fontWeight: 800, minHeight: 44, padding: "10px 18px", boxShadow: SHADOW_SOFT }}>
+              ▸ Receptkaart
+            </button>
+            {selected.length > 1 && (
+              <button className="kg-ich-btn" onClick={() => setHeroIdx((hIdx + 1) % selected.length)}
+                style={{ background: "#fff", border: `2px solid ${LINE}`, borderRadius: R_PILL,
+                  color: INK_SOFT, fontSize: 14, fontWeight: 800, minHeight: 44, padding: "9px 16px" }}>
+                Recept wisselen
+              </button>
+            )}
+          </div>
+        </section>
+
+        {/* mise en place — scaled ingredients */}
+        <section style={{ background: CARD, borderRadius: R_LG, padding: "16px 18px", boxShadow: SHADOW_SOFT }}>
+          <SecTag onCard k="皿" label="Mise en place" right={`${servings} PORTIES`} />
+          {(heroRecipe.ingredients || []).map((ing, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10,
+              minHeight: 42, padding: "3px 0", borderBottom: `1px solid ${LINE}`, fontSize: 14 }}>
+              <span style={{ fontWeight: 600, color: INK }}>{ing.name}</span>
+              <span style={{ fontWeight: 800, color: SAKURA_DP, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                {fmtQty((Number(ing.qty) || 0) * scale)} {ing.unit}
+              </span>
+            </div>
+          ))}
+        </section>
+
+        {/* per-phase step timeline */}
+        <section style={{ background: CARD, borderRadius: R_LG, padding: "16px 18px", boxShadow: SHADOW_SOFT }}>
+          <SecTag onCard k="火" label="Bereiding" right={`${heroT.steps.length} STAPPEN`} />
+          <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            {heroT.steps.map((s, i) => {
+              const passive = s.mode === "passive";
+              return (
+                <li key={i} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "11px 0",
+                  borderBottom: i < heroT.steps.length - 1 ? `1px solid ${LINE}` : "none" }}>
+                  <span style={{ flex: "0 0 auto", width: 28, height: 28, borderRadius: "50%", background: passive ? RAMUNE : SAKURA,
+                    color: "#fff", fontWeight: 800, fontSize: 13.5, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
+                  <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: INK, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{s.text}</span>
+                  {s.minutes != null && (
+                    <span style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 800, padding: "4px 10px", borderRadius: R_PILL,
+                      whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", letterSpacing: "0.06em",
+                      background: passive ? "#E4F3F5" : "#FFE3EA", color: passive ? RAMUNE_DP : SAKURA_DP }}>
+                      {passive ? "WACHT" : "ACTIEF"} {s.minutes}′
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+          <p style={{ fontSize: 12.5, color: INK_SOFT, margin: "10px 0 0", lineHeight: 1.6 }}>
+            <b style={{ color: INK }}>Roze = handen bezig, blauw = je bent vrij.</b>
+          </p>
+        </section>
+      </div>
+    );
+  }
+
+  /* ═══════════════════ shell — header · mode pane · mode nav ═══════════════ */
+  const shopLeft = shoppingList.length - checkedCount;
+  const navBadge = {
+    plan: selected.length ? `${selected.length}/${MAX_DINNERS}` : "",
+    shop: shoppingList.length ? (shopLeft > 0 ? `${shopLeft} te gaan` : "✓ klaar") : "",
+    cook: heroT ? `${heroT.total}′` : "",
+  };
+
   return (
-    <div className="kg-ichikawa" data-kg-component="ichikawa-surface" data-kg-owner="kg"
-      style={{ position: "fixed", inset: 0, display: "flex", flexDirection: "column", overflow: "hidden",
+    <div className={wide ? "kg-ichikawa kg-ich--wide" : "kg-ichikawa"} data-kg-component="ichikawa-surface" data-kg-owner="kg"
+      style={{ position: embedded ? "absolute" : "fixed", inset: 0, display: "flex", flexDirection: "column", overflow: "hidden",
         background: G_BG,
         backgroundImage: `radial-gradient(${G_DOTS} 1.6px, transparent 1.7px)`,
         backgroundSize: "24px 24px",
@@ -524,662 +1344,212 @@ export default function IchikawaSurface({ onExit }) {
         @keyframes ichFade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
         @keyframes ichPop{from{opacity:0;transform:scale(0.94)}to{opacity:1;transform:scale(1)}}
         @keyframes ichBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+        @keyframes ichSheet{from{transform:translateY(48px);opacity:.4}to{transform:translateY(0);opacity:1}}
+        @keyframes ichStamp{0%{transform:scale(0) rotate(-24deg)}70%{transform:scale(1.3) rotate(8deg)}100%{transform:scale(1) rotate(0deg)}}
         .kg-ichikawa *{box-sizing:border-box;}
-        .kg-ichikawa ::-webkit-scrollbar{width:9px;height:9px;}
+        .kg-ichikawa ::-webkit-scrollbar{width:7px;height:7px;}
         .kg-ichikawa ::-webkit-scrollbar-track{background:transparent;}
-        .kg-ichikawa ::-webkit-scrollbar-thumb{background:${LINE};border-radius:9px;}
-        .kg-ichikawa ::-webkit-scrollbar-thumb:hover{background:#E6CBB0;}
+        .kg-ichikawa ::-webkit-scrollbar-thumb{background:${LINE};border-radius:7px;}
         .kg-ich-bob{animation:ichBob 4s ease-in-out infinite;transform-origin:center;}
-        .kg-ich-card{transition:transform .18s ease, box-shadow .18s ease;}
-        .kg-ich-card:hover{transform:translateY(-4px);box-shadow:${SHADOW_LIFT};}
+        .kg-ich-stamp{animation:ichStamp .35s ease;}
+        .kg-ich-card{transition:box-shadow .18s ease, transform .15s ease;}
         .kg-ich-btn{transition:transform .12s ease, filter .12s ease, background .15s ease, color .15s ease;cursor:pointer;font-family:inherit;}
-        .kg-ich-btn:hover{transform:translateY(-2px);filter:saturate(1.08);}
+        .kg-ich-btn:active{transform:scale(.95);}
         .kg-ich-btn:focus-visible{outline:3px solid ${RAMUNE};outline-offset:2px;}
         .kg-ich-chip{transition:transform .12s ease, filter .12s ease;cursor:pointer;font-family:inherit;}
-        .kg-ich-chip:hover{transform:translateY(-1px);}
-        .kg-ich-cell{transition:transform .15s ease, box-shadow .15s ease;}
-        .kg-ich-cell:hover{transform:translateY(-2px);box-shadow:${SHADOW_SOFT};}
+        .kg-ich-chip:active{transform:scale(.95);}
+        .kg-ich-day{transition:box-shadow .15s ease, transform .15s ease;}
         .kg-ich-title{cursor:pointer;transition:color .15s ease;}
         .kg-ich-title:hover{color:${SAKURA_DP};}
         .kg-ich-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
-        .kg-ich-search-input{width:100%;max-width:420px;box-sizing:border-box;background:#fff;
-          border:2px solid ${LINE};border-radius:${R_PILL}px;padding:11px 20px 11px 40px;
-          font-size:14px;font-family:inherit;color:${INK};box-shadow:${SHADOW_SOFT};outline:none;
+        .kg-ich-clamp1{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;}
+        .kg-ich-search-input{width:100%;box-sizing:border-box;background:#fff;
+          border:2px solid ${LINE};border-radius:${R_PILL}px;padding:12px 44px 12px 42px;min-height:48px;
+          font-size:15px;font-family:inherit;color:${INK};box-shadow:${SHADOW_SOFT};outline:none;
           transition:border-color .15s ease, box-shadow .15s ease;}
         .kg-ich-search-input::placeholder{color:${INK_SOFT};}
         .kg-ich-search-input:focus{border-color:${MATCHA_DP};box-shadow:0 0 0 3px rgba(147,207,160,.28), ${SHADOW_SOFT};}
-        .kg-ich-remove{flex-shrink:0;width:24px;height:24px;border-radius:50%;border:none;
-          background:#FFE9EC;color:${AZUKI};font-size:13px;font-weight:800;line-height:1;
-          box-shadow:0 2px 5px rgba(214,91,120,.28);opacity:0;cursor:pointer;}
-        .kg-ich-card:hover .kg-ich-remove,.kg-ich-remove:focus-visible{opacity:1;}
-        /* layout-2.0 grids: hero (main + stats side), 7-day strip, recept | boodschappen+route */
-        .kg-ich-hero{display:grid;grid-template-columns:minmax(0,1fr) 300px;}
-        .kg-ich-week{display:grid;grid-template-columns:repeat(7,1fr);gap:12px;}
-        .kg-ich-twocol{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:20px;align-items:start;}
-        .kg-ich-day{transition:transform .15s ease, box-shadow .15s ease;}
-        .kg-ich-day:hover{transform:translateY(-2px);box-shadow:${SHADOW_LIFT};}
-        .kg-ich-gitem{display:flex;align-items:center;gap:10px;padding:5px 0;cursor:pointer;}
-        .kg-ich-gitem input{accent-color:${MATCHA_DP};width:15px;height:15px;flex-shrink:0;cursor:pointer;margin:0;}
-        .kg-ich-gitem .kg-ich-gnm{flex:1;font-size:13.5px;font-weight:600;color:${INK};transition:color .15s ease;}
+        /* week bento rail — 7 days, snap-scroll (one-thumb swipe) */
+        .kg-ich-rail{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;
+          padding:2px 2px 12px;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+        .kg-ich-rail::-webkit-scrollbar{display:none;}
+        .kg-ich-rail>*{scroll-snap-align:center;flex:0 0 168px;min-width:168px;}
+        /* horizontal chip strips (filters, paw trail) */
+        .kg-ich-chiprow{display:flex;align-items:center;gap:8px;overflow-x:auto;padding:2px 2px 10px;
+          -webkit-overflow-scrolling:touch;scrollbar-width:none;}
+        .kg-ich-chiprow::-webkit-scrollbar{display:none;}
+        .kg-ich-trail{display:flex;align-items:center;gap:7px;overflow-x:auto;padding:4px 4px 8px;
+          -webkit-overflow-scrolling:touch;scrollbar-width:none;}
+        .kg-ich-trail::-webkit-scrollbar{display:none;}
+        /* grocery rows — 52px whole-row tap targets */
+        .kg-ich-gitem{display:flex;align-items:center;gap:12px;min-height:52px;padding:4px 2px;cursor:pointer;}
+        .kg-ich-gitem input{accent-color:${MATCHA_DP};width:22px;height:22px;flex-shrink:0;cursor:pointer;margin:0;}
+        .kg-ich-gitem .kg-ich-gnm{flex:1;font-size:15px;font-weight:600;color:${INK};transition:color .15s ease;}
         .kg-ich-gitem--on .kg-ich-gnm{color:${INK_SOFT};text-decoration:line-through;text-decoration-color:#D9C3AC;}
-        @media(max-width:1500px){.kg-ich-week{grid-template-columns:repeat(4,1fr);}}
-        @media(max-width:1250px){.kg-ich-hero,.kg-ich-twocol{grid-template-columns:1fr;}
-          .kg-ich-hero-main{border-right:none !important;border-bottom:1px solid ${LINE};}}
-        @media(prefers-reduced-motion:reduce){.kg-ich-bob{animation:none;}.kg-ich-card,.kg-ich-btn,.kg-ich-chip,.kg-ich-cell,.kg-ich-day{transition:none;}}
+        /* ── desktop desk — gated by the ONE JS breakpoint (WIDE_MQ) via the
+           .kg-ich-desk / .kg-ich--wide classes; no second width lives here.
+           The !importants below exist only to overrule the phone's inline
+           styles from a desk-scoped class — never used outside .kg-ich-desk. */
+        .kg-ich-desk{flex:1;min-height:0;display:grid;
+          grid-template-columns:minmax(320px,430px) minmax(400px,1fr) minmax(340px,460px);}
+        .kg-ich-desk-col{min-width:0;min-height:0;overflow-y:auto;overscroll-behavior:contain;}
+        .kg-ich-desk-col+.kg-ich-desk-col{border-left:1px solid ${G_LINE};}
+        /* the phone's snap strip becomes a vertical week board — whole week visible */
+        .kg-ich-desk .kg-ich-rail{flex-direction:column;overflow:visible;scroll-snap-type:none;}
+        .kg-ich-desk .kg-ich-rail>*{flex:0 0 auto;width:100%;min-width:0;scroll-snap-align:none;min-height:118px!important;}
+        /* filter strips + paw trail wrap instead of scrolling sideways */
+        .kg-ich-desk .kg-ich-chiprow{flex-wrap:wrap;overflow-x:visible;}
+        .kg-ich-desk .kg-ich-trail{flex-wrap:wrap;overflow-x:visible;row-gap:9px;}
+        /* the library's tap rows regrid into recipe cards */
+        .kg-ich-desk .kg-ich-lib-list{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));}
+        /* bottom sheets become centered modals on the desk */
+        .kg-ich--wide .kg-ich-overlay{align-items:center!important;padding:28px;}
+        .kg-ich--wide .kg-ich-sheet{border-radius:${R_LG}px!important;max-height:88%!important;animation:ichPop .22s ease!important;}
+        .kg-ich--wide .kg-ich-grab{display:none;}
+        /* mouse affordances — hover-capable devices only, touch never sees them */
+        @media(hover:hover){
+          .kg-ich-card:hover,.kg-ich-day:hover{transform:translateY(-2px);}
+          .kg-ich-btn:hover{filter:brightness(1.05);}
+          .kg-ich-chip:hover{transform:translateY(-1px);}
+          .kg-ich-gitem:not(.kg-ich-gitem--on):hover .kg-ich-gnm{color:${SAKURA_DP};}
+        }
+        @media(prefers-reduced-motion:reduce){.kg-ich-bob,.kg-ich-stamp{animation:none;}
+          .kg-ich-card,.kg-ich-btn,.kg-ich-chip,.kg-ich-day{transition:none;}}
       `}</style>
 
-      {/* ── Header — Ichikawa's own kawaii wordmark; no Shadow Crew chrome ── */}
-      <header style={{ flexShrink: 0, position: "relative", overflow: "hidden",
-        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 18,
-        padding: "16px 30px", borderBottom: `1px solid ${LINE}`,
+      {/* ── compact header — kawaii wordmark, week stamp, scout, exit ── */}
+      <header style={{ flexShrink: 0, position: "relative", zIndex: 2, display: "flex", alignItems: "center", gap: 12,
+        padding: "10px 16px", borderBottom: `1px solid ${LINE}`,
         background: "linear-gradient(160deg,#FFFDFB,#FFF0E4)", boxShadow: SHADOW_SOFT }}>
-        <div aria-hidden="true" style={{ position: "absolute", right: -40, top: -70, width: 200, height: 200,
-          background: "radial-gradient(circle,#FFE1B0,transparent 70%)", opacity: 0.55, pointerEvents: "none" }} />
-        <div style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0, position: "relative", zIndex: 1 }}>
-          <span style={{ fontFamily: F_ROUND, fontSize: 40, fontWeight: 800, color: SAKURA,
-            textShadow: "2px 3px 0 #FFE3EA", lineHeight: 0.9 }}>市川</span>
-          <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-              <span style={{ fontFamily: F_DISPLAY, fontSize: 26, fontWeight: 800, letterSpacing: 0.5, color: INK }}>
-                Ichi<span style={{ color: MATCHA_DP }}>kawa</span>
-              </span>
-              <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: "0.18em", textTransform: "uppercase", color: SAKURA_DP }}>
-                Market Scout
-              </span>
-              <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.24em", color: MATCHA_DP,
-                border: `2px solid ${MATCHA}`, borderRadius: R_PILL, padding: "1px 9px", background: "#fff" }}>
-                PERSONAL
-              </span>
-            </div>
-            <span style={{ fontSize: 14, color: INK_SOFT }}>
-              Je kitchen-scout: weekbento &amp; boodschappen, netjes gesorteerd.
+        <span style={{ fontFamily: F_ROUND, fontSize: 27, fontWeight: 800, color: SAKURA,
+          textShadow: "2px 2px 0 #FFE3EA", lineHeight: 0.9, flexShrink: 0 }}>市川</span>
+        <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+            <span style={{ fontFamily: F_DISPLAY, fontSize: 17, fontWeight: 800, letterSpacing: 0.4, color: INK, whiteSpace: "nowrap" }}>
+              Ichi<span style={{ color: MATCHA_DP }}>kawa</span>
+            </span>
+            <span style={{ fontSize: 8.5, fontWeight: 800, letterSpacing: "0.2em", color: MATCHA_DP, flexShrink: 0,
+              border: `2px solid ${MATCHA}`, borderRadius: R_PILL, padding: "1px 7px", background: "#fff" }}>
+              PERSONAL
             </span>
           </div>
+          <span className="kg-ich-clamp1" style={{ fontSize: 11, color: INK_SOFT, fontWeight: 600 }}>
+            Market Scout · {loaded ? `${recipes.length} recepten` : "laden…"}
+          </span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 14, position: "relative", zIndex: 1 }}>
-          <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.16em", color: INK_SOFT, whiteSpace: "nowrap" }}>
-            WEEK {weekNr} · {fmtD(weekDays[0])} - {fmtD(weekDays[6])}
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.14em", color: INK_SOFT, whiteSpace: "nowrap" }}>
+            WEEK {weekNr}
           </span>
-          <Mascot type="cat" size={54} style={{ marginRight: 2 }} />
-          <span style={{ fontSize: 13.5, color: INK_SOFT, fontWeight: 600, whiteSpace: "nowrap" }}>
-            {loaded ? `${recipes.length} recepten` : "laden…"}
-          </span>
+          <Mascot type="cat" size={38} />
           {onExit && (
-            <button className="kg-ich-btn" onClick={onExit}
-              style={{ background: "#fff", border: "none", borderRadius: R_PILL, color: MATCHA_DP,
-                fontSize: 14, fontWeight: 800, padding: "9px 16px", boxShadow: SHADOW_SOFT }}>
-              ← Kage-gumi
+            <button className="kg-ich-btn" onClick={onExit} aria-label="terug naar Kage-gumi" title="Terug naar Kage-gumi"
+              style={{ width: 38, height: 38, borderRadius: "50%", background: "#fff", border: "none",
+                color: MATCHA_DP, fontSize: 17, fontWeight: 800, lineHeight: 1, boxShadow: SHADOW_SOFT }}>
+              ←
             </button>
           )}
         </div>
       </header>
 
-      {/* ── Body — layout-2.0 port: single scroll · vanavond-hero → weekmenu →
-             recept + boodschappen/route → receptenbibliotheek ── */}
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "26px 34px 56px", animation: "ichFade .35s ease" }}>
-        <div style={{ maxWidth: 1400, margin: "0 auto", display: "flex", flexDirection: "column", gap: 32 }}>
-
-          {/* ═══ VANAVOND hero — dish + facts + actief/wachten split + week stats ═══ */}
-          <section className="kg-ich-hero" style={{ background: CARD, borderRadius: R_LG, overflow: "hidden", boxShadow: SHADOW_SOFT }}>
-            {heroRecipe && heroT ? (
-              <>
-                <div className="kg-ich-hero-main" style={{ position: "relative", padding: "24px 28px 26px", borderRight: `1px solid ${LINE}`, minWidth: 0 }}>
-                  <span aria-hidden="true" style={{ position: "absolute", right: 14, top: 2, fontSize: 84, opacity: 0.14, pointerEvents: "none" }}>
-                    {cuisineOf(heroRecipe.cuisine).emoji}
-                  </span>
-                  <div style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: "0.3em", textTransform: "uppercase", color: SAKURA_DP, marginBottom: 10 }}>
-                    今夜 · {hIdx === todayIdx ? "Wat eten we vanavond" : "Gepland"} · {DAY_FULL[hIdx]} {fmtD(weekDays[hIdx])}
-                  </div>
-                  <h2 className="kg-ich-title" onClick={() => setDetail(heroRecipe)}
-                    style={{ fontFamily: F_DISPLAY, fontSize: 27, fontWeight: 800, color: INK, lineHeight: 1.25, margin: "0 0 8px", maxWidth: "26ch" }}>
-                    {heroRecipe.title}
-                  </h2>
-                  {heroRecipe.subtitle && (
-                    <p style={{ fontSize: 14, color: INK_SOFT, lineHeight: 1.7, margin: "0 0 18px", maxWidth: "52ch" }}>{heroRecipe.subtitle}</p>
-                  )}
-                  {/* facts row */}
-                  <div style={{ display: "flex", gap: 28, flexWrap: "wrap", marginBottom: 18 }}>
-                    {[
-                      [`${heroT.total}′`, "TOTAAL"],
-                      [`${heroT.active}′`, "HANDS-ON"],
-                      [String(servings), "PORTIES"],
-                      [String((heroRecipe.ingredients || []).length), "INGREDIËNTEN"],
-                    ].map(([v, l]) => (
-                      <div key={l}>
-                        <div style={{ fontFamily: F_DISPLAY, fontSize: 22, fontWeight: 800, color: INK, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{v}</div>
-                        <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.2em", color: INK_SOFT, marginTop: 3 }}>{l}</div>
-                      </div>
-                    ))}
-                  </div>
-                  {/* actief vs wachten split bar */}
-                  <div role="img" aria-label={`${heroT.active} minuten actief, ${heroT.passive} minuten wachten`}
-                    style={{ display: "flex", gap: 3, height: 12, borderRadius: R_PILL, overflow: "hidden", maxWidth: 460 }}>
-                    <span style={{ flex: heroT.active || 1, background: SAKURA }} />
-                    {heroT.passive > 0 && <span style={{ flex: heroT.passive, background: RAMUNE }} />}
-                  </div>
-                  <div style={{ display: "flex", gap: 18, marginTop: 8, fontSize: 12, fontWeight: 800, letterSpacing: "0.1em" }}>
-                    <span style={{ color: SAKURA_DP }}>
-                      <span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 3, background: SAKURA, marginRight: 6, verticalAlign: "-1px" }} />
-                      ACTIEF {heroT.active}′
-                    </span>
-                    <span style={{ color: RAMUNE_DP }}>
-                      <span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 3, background: RAMUNE, marginRight: 6, verticalAlign: "-1px" }} />
-                      WACHTEN {heroT.passive}′
-                    </span>
-                  </div>
-                  {heroT.tip && (
-                    <p style={{ margin: "14px 0 0", fontSize: 13.5, lineHeight: 1.6, color: INK_SOFT, borderLeft: `3px solid ${RAMUNE}`, paddingLeft: 12, maxWidth: "54ch" }}>
-                      💡 {heroT.tip}
-                    </p>
-                  )}
-                  <div style={{ display: "flex", gap: 10, marginTop: 20, flexWrap: "wrap" }}>
-                    <button className="kg-ich-btn" onClick={() => setDetail(heroRecipe)}
-                      style={{ background: SAKURA, border: "none", borderRadius: R_PILL, color: "#fff",
-                        fontSize: 14, fontWeight: 800, padding: "10px 18px", boxShadow: SHADOW_SOFT }}>
-                      ▸ Start kookmodus
-                    </button>
-                    {selected.length > 1 && (
-                      <button className="kg-ich-btn" onClick={() => setHeroIdx((hIdx + 1) % selected.length)}
-                        style={{ background: "#fff", border: `2px solid ${LINE}`, borderRadius: R_PILL,
-                          color: INK_SOFT, fontSize: 14, fontWeight: 800, padding: "8px 16px" }}>
-                        Recept wisselen
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {/* week stats side panel */}
-                <aside style={{ background: RICE2, padding: "22px 24px", display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.26em", textTransform: "uppercase", color: MATCHA_DP }}>均 · Deze week</span>
-                    <Mascot type="tamago" size={30} style={{ marginLeft: "auto", marginTop: -4 }} />
-                  </div>
-                  {[
-                    ["DINERS", `${selected.length} / ${MAX_DINNERS}`],
-                    ["KOOKTIJD TOTAAL", fmtDur(weekStats.total)],
-                    ["HANDS-ON", fmtDur(weekStats.active)],
-                    ["BOODSCHAPPEN", `${shoppingList.length} items`],
-                  ].map(([l, v]) => (
-                    <div key={l} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${LINE}` }}>
-                      <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.16em", color: INK_SOFT }}>{l}</span>
-                      <span style={{ fontSize: 15, fontWeight: 800, color: INK, fontVariantNumeric: "tabular-nums" }}>{v}</span>
-                    </div>
-                  ))}
-                  <div style={{ marginTop: 10 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                      <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.16em", color: INK_SOFT }}>EIWITBALANS</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: INK_SOFT }}>{selected.length} {selected.length === 1 ? "avond" : "avonden"}</span>
-                    </div>
-                    <div style={{ display: "flex", height: 9, borderRadius: R_PILL, overflow: "hidden", background: "#F3E6D6", marginTop: 8 }}>
-                      {["meat", "chicken", "fish", "veg"].map(k => weekStats.cats[k] > 0 && (
-                        <span key={k} style={{ flex: weekStats.cats[k], background: CAT_META[k].bar }} />
-                      ))}
-                    </div>
-                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 9 }}>
-                      {["meat", "chicken", "fish", "veg"].map(k => (
-                        <span key={k} style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.12em", color: CAT_META[k].fg, display: "inline-flex", alignItems: "center", gap: 5 }}>
-                          <span style={{ width: 8, height: 8, borderRadius: "50%", background: CAT_META[k].bar }} />
-                          {CAT_META[k].label} {weekStats.cats[k]}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </aside>
-              </>
-            ) : (
-              /* empty hero — Onigiri-chan nudge */
-              <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "44px 24px", textAlign: "center", color: INK_SOFT }}>
-                <Mascot type="onigiri" size={72} />
-                <div style={{ fontSize: 14.5, lineHeight: 1.65, maxWidth: "48ch" }}>
-                  Nog geen diners gekozen! Tik <span style={{ color: SAKURA_DP, fontWeight: 800 }}>+</span> op een recept
-                  in de bibliotheek hieronder om je week te vullen.
-                </div>
-              </div>
-            )}
-          </section>
-
-          {/* ═══ WEEKMENU — 7-day strip (5 bento-slots + vrij weekend) ═══ */}
-          <section>
-            <SecTag k="献" label="Weekmenu" right={`${fmtD(weekDays[0])} - ${fmtD(weekDays[6])} · KLEUR = EIWIT`} />
-            {/* plan controls — servings scaling + clear (always reachable) */}
-            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
-              <span style={{ fontSize: 14, color: G_MUTED, fontWeight: 700 }}>Porties</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <button className="kg-ich-btn" aria-label="minder porties" onClick={() => setServings(s => Math.max(1, s - 1))}
-                  style={{ width: 30, height: 30, borderRadius: "50%", border: "none", background: MATCHA, color: "#fff",
-                    fontSize: 18, fontWeight: 800, boxShadow: SHADOW_SOFT, lineHeight: 1 }}>–</button>
-                <span style={{ fontSize: 19, fontWeight: 800, minWidth: "1.6ch", textAlign: "center", color: G_TEXT,
-                  fontVariantNumeric: "tabular-nums" }}>{servings}</span>
-                <button className="kg-ich-btn" aria-label="meer porties" onClick={() => setServings(s => Math.min(12, s + 1))}
-                  style={{ width: 30, height: 30, borderRadius: "50%", border: "none", background: MATCHA, color: "#fff",
-                    fontSize: 18, fontWeight: 800, boxShadow: SHADOW_SOFT, lineHeight: 1 }}>+</button>
-              </div>
-              <span style={{ fontSize: 13.5, fontWeight: 800, color: selected.length ? SAKURA_DP : G_MUTED }}>
-                {selected.length} / {MAX_DINNERS} diners
-              </span>
-              {selected.length > 0 && (
-                <button className="kg-ich-btn" onClick={() => setSelected([])}
-                  style={{ marginLeft: "auto", background: "#fff", border: "none", borderRadius: R_PILL,
-                    color: INK_SOFT, fontSize: 13, fontWeight: 800, padding: "7px 13px", boxShadow: SHADOW_SOFT }}>
-                  Leegmaken
-                </button>
-              )}
+      {wide ? (
+        /* ── the management desk — plan · bibliotheek · shop/kook side panel ── */
+        <div className="kg-ich-desk">
+          {/* 献 plan column — build the week */}
+          <div className="kg-ich-desk-col">
+            <div style={DESK_PANE}>
+              {renderOffline()}
+              {renderTonight()}
+              {renderWeekRail()}
+              {renderPorties()}
+              {renderWeekStats()}
             </div>
-            <div className="kg-ich-week" role="list" aria-label={`Weekmenu met ${selected.length} van ${MAX_DINNERS} geplande diners`}>
-              {weekDays.map((d, i) => {
-                const isToday = i === todayIdx;
-                const dnum = String(d.getDate()).padStart(2, "0");
-                if (i >= MAX_DINNERS) {
-                  /* ZA/ZO — buiten het 5-diner bentoplan */
-                  return (
-                    <div key={i} role="listitem" style={{ minHeight: 148, borderRadius: R_MD, border: `2px dashed ${G_LINE}`,
-                      padding: "12px 12px", display: "flex", flexDirection: "column", gap: 8, color: G_MUTED }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                        <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.18em", color: isToday ? SAKURA_DP : G_MUTED }}>
-                          {DAY_ABBR[i]}{isToday ? " · VANDAAG" : ""}
-                        </span>
-                        <span style={{ fontSize: 11, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{dnum}</span>
-                      </div>
-                      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 700 }}>
-                        vrije avond
-                      </div>
-                    </div>
-                  );
-                }
-                const id = selected[i];
-                const r = id ? byId(id) : null;
-                if (!r) {
-                  const firstEmpty = i === selected.length; // the next slot to fill
-                  return (
-                    <button key={i} role="listitem" className="kg-ich-btn"
-                      onClick={() => libRef.current && libRef.current.scrollIntoView({ behavior: "smooth", block: "start" })}
-                      style={{ minHeight: 148, borderRadius: R_MD, border: `2px dashed ${firstEmpty ? SAKURA : G_LINE}`,
-                        background: "transparent", padding: "12px 12px", display: "flex", flexDirection: "column", gap: 8,
-                        color: firstEmpty ? SAKURA_DP : G_MUTED, textAlign: "left" }}>
-                      <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
-                        <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.18em", color: isToday ? SAKURA_DP : G_MUTED }}>
-                          {DAY_ABBR[i]}{isToday ? " · VANDAAG" : ""}
-                        </span>
-                        <span style={{ fontSize: 11, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{dnum}</span>
-                      </span>
-                      <span style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, width: "100%" }}>
-                        <span style={{ fontSize: 22, lineHeight: 1 }}>＋</span>
-                        <span style={{ fontSize: 12.5, fontWeight: 700 }}>{firstEmpty ? "kies een gerecht" : "leeg"}</span>
-                      </span>
-                    </button>
-                  );
-                }
-                const c = catById.get(id) || "veg";
-                const cz = cuisineOf(r.cuisine);
-                const time = r.totalTime || r.prepTime;
+          </div>
+          {/* 皿 bibliotheek column — curate the library */}
+          <div className="kg-ich-desk-col">
+            <div style={{ ...DESK_PANE, maxWidth: 760, margin: "0 auto", width: "100%" }}>
+              {renderLibrary()}
+            </div>
+          </div>
+          {/* 買/火 side panel — the execution jobs, previewed one at a time */}
+          <aside className="kg-ich-desk-col" aria-label="Shop en kook paneel">
+            <div style={{ position: "sticky", top: 0, zIndex: 3, display: "flex", gap: 8,
+              padding: "12px 16px 10px", background: G_BG, borderBottom: `1px solid ${G_LINE}` }}>
+              {[{ id: "shop", k: "買", label: "Shop", key: "S", badge: navBadge.shop },
+                { id: "cook", k: "火", label: "Kook", key: "K", badge: navBadge.cook }].map(t => {
+                const on = deskSide === t.id;
                 return (
-                  <article key={i} role="listitem" className="kg-ich-day" onClick={() => setDetail(r)}
-                    style={{ position: "relative", minHeight: 148, background: CARD, borderRadius: R_MD, padding: "12px 12px 10px",
-                      display: "flex", flexDirection: "column", gap: 7, cursor: "pointer",
-                      boxShadow: i === hIdx ? `0 0 0 3px ${SAKURA}, ${SHADOW_SOFT}` : SHADOW_SOFT }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingRight: 20 }}>
-                      <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.18em", color: isToday ? SAKURA_DP : INK_SOFT }}>
-                        {DAY_ABBR[i]}{isToday ? " · VANDAAG" : ""}
-                      </span>
-                      <span style={{ fontSize: 11, fontWeight: 800, color: "#C7A98F", fontVariantNumeric: "tabular-nums" }}>{dnum}</span>
-                    </div>
-                    <div className="kg-ich-clamp" style={{ fontSize: 13.5, fontWeight: 800, color: INK, lineHeight: 1.3, flex: "0 0 auto" }}>
-                      {cz.emoji} {r.title}
-                    </div>
-                    <div className="kg-ich-clamp" style={{ fontSize: 11.5, color: INK_SOFT, lineHeight: 1.5, flex: 1 }}>
-                      {(r.ingredients || []).slice(0, 3).map(x => (x.name || "").toLowerCase()).join(" · ")}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, fontWeight: 800, letterSpacing: "0.14em", color: CAT_META[c].fg }}>
-                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: CAT_META[c].bar, flexShrink: 0 }} />
-                      {CAT_META[c].label}{time ? ` · ${time}′` : ""}
-                    </div>
-                    <button className="kg-ich-btn" aria-label={`"${r.title}" uit het weekmenu`}
-                      onClick={e => { e.stopPropagation(); removeAt(i); }}
-                      style={{ position: "absolute", top: 6, right: 6, width: 22, height: 22, borderRadius: "50%",
-                        border: "none", background: "#FFE9EC", color: AZUKI, fontSize: 14, lineHeight: 1,
-                        fontWeight: 800, boxShadow: "0 2px 5px rgba(214,91,120,.28)" }}>×</button>
-                  </article>
+                  <button key={t.id} className="kg-ich-btn" onClick={() => setDeskSide(t.id)} aria-pressed={on}
+                    title={`${t.label} — toets ${t.key}`}
+                    style={{ flex: 1, minHeight: 42, borderRadius: R_PILL, border: "none",
+                      background: on ? SAKURA : CARD, color: on ? "#fff" : INK_SOFT,
+                      fontSize: 12.5, fontWeight: 800, letterSpacing: "0.08em", whiteSpace: "nowrap",
+                      boxShadow: on ? "0 6px 14px rgba(242,109,139,.30)" : SHADOW_SOFT }}>
+                    {t.k} {t.label.toUpperCase()}{t.badge ? ` · ${t.badge}` : ""}
+                  </button>
                 );
               })}
             </div>
-          </section>
-
-          {/* ═══ RECEPT (act/wait steps) | BOODSCHAPPEN + WINKELROUTE ═══ */}
-          <div className="kg-ich-twocol">
-            {/* recipe card — vanavond's dish, full act/wait step detail */}
-            <section style={{ background: CARD, borderRadius: R_LG, padding: "22px 26px", boxShadow: SHADOW_SOFT, minWidth: 0 }}>
-              <SecTag onCard k="皿" label={`Recept · ${heroRecipe && hIdx !== todayIdx ? DAY_FULL[hIdx].toLowerCase() : "vanavond"}`}
-                right={heroRecipe ? `${servings} PORTIES` : ""} />
-              {heroRecipe && heroT ? (
-                <>
-                  <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.26em", textTransform: "uppercase", color: INK_SOFT, marginBottom: 6 }}>Ingrediënten</div>
-                  <div style={{ columns: 2, columnGap: 26 }}>
-                    {(heroRecipe.ingredients || []).map((ing, i) => (
-                      <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "7px 0",
-                        borderBottom: `1px solid ${LINE}`, breakInside: "avoid", fontSize: 14 }}>
-                        <span style={{ fontWeight: 600, color: INK }}>{ing.name}</span>
-                        <span style={{ fontWeight: 800, color: SAKURA_DP, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
-                          {fmtQty((Number(ing.qty) || 0) * (servings / (heroRecipe.servings || servings || 1)))} {ing.unit}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.26em", textTransform: "uppercase", color: INK_SOFT, margin: "20px 0 4px" }}>Bereiding</div>
-                  <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                    {heroT.steps.map((s, i) => {
-                      const passive = s.mode === "passive";
-                      return (
-                        <li key={i} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "10px 0",
-                          borderBottom: i < heroT.steps.length - 1 ? `1px solid ${LINE}` : "none" }}>
-                          <span style={{ flex: "0 0 auto", width: 26, height: 26, borderRadius: "50%", background: passive ? RAMUNE : SAKURA,
-                            color: "#fff", fontWeight: 800, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
-                          <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: INK, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{s.text}</span>
-                          {s.minutes != null && (
-                            <span style={{ flex: "0 0 auto", fontSize: 12, fontWeight: 800, padding: "4px 10px", borderRadius: R_PILL,
-                              whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", letterSpacing: "0.08em",
-                              background: passive ? "#E4F3F5" : "#FFE3EA", color: passive ? RAMUNE_DP : SAKURA_DP }}>
-                              {passive ? "WACHTEN" : "ACTIEF"} {s.minutes}′
-                            </span>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ol>
-                  <p style={{ fontSize: 13, color: INK_SOFT, margin: "12px 0 0", lineHeight: 1.6 }}>
-                    <b style={{ color: INK }}>Roze = handen bezig, blauw = je bent vrij.</b> Open de kookmodus voor de tijdlijn per fase.
-                  </p>
-                </>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "36px 0", color: INK_SOFT }}>
-                  <Mascot type="matcha" size={64} bob={false} />
-                  <span style={{ fontSize: 14, fontWeight: 700 }}>Kies een gerecht, dan verschijnt het recept hier.</span>
-                </div>
-              )}
-            </section>
-
-            {/* grocery checklist + winkelroute */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 20, minWidth: 0 }}>
-              {/* aisled checklist — walk-ordered zones from the Jumbo route engine */}
-              <section style={{ background: CARD, borderRadius: R_LG, padding: "22px 24px", boxShadow: SHADOW_SOFT }}>
-                <SecTag onCard k="買" label="Boodschappen" right={shoppingList.length ? `${checkedCount} / ${shoppingList.length} BINNEN` : ""} />
-                {route.stops.length === 0 ? (
-                  <p style={{ fontSize: 14, color: INK_SOFT, margin: 0, lineHeight: 1.6 }}>
-                    Je lijst is nog leeg. Vul eerst het weekmenu, dan verschijnen de boodschappen hier per gang gesorteerd.
-                  </p>
-                ) : (
-                  <>
-                    {route.stops.map((s, i) => (
-                      <div key={s.zone.id} style={{ marginBottom: i < route.stops.length - 1 ? 16 : 0 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 3 }}>
-                          <span style={{ fontSize: 12, fontWeight: 800, color: MATCHA_DP, fontVariantNumeric: "tabular-nums" }}>{String(i + 1).padStart(2, "0")}</span>
-                          <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: "0.18em", textTransform: "uppercase", color: INK_SOFT }}>{s.zone.emoji} {s.zone.label}</span>
-                          <span aria-hidden="true" style={{ flex: 1, height: 2, borderRadius: 2, background: `linear-gradient(90deg, ${LINE}, transparent)` }} />
-                          <span style={{ fontSize: 11.5, fontWeight: 800, color: "#C7A98F", fontVariantNumeric: "tabular-nums" }}>{s.items.length}×</span>
-                        </div>
-                        {s.items.map((it, j) => {
-                          const key = `${it.name}__${it.unit || ""}`;
-                          const on = aisleChecked.has(key);
-                          return (
-                            <label key={`${key}_${j}`} className={`kg-ich-gitem${on ? " kg-ich-gitem--on" : ""}`}>
-                              <input type="checkbox" checked={on} onChange={() => toggleAisle(key)} />
-                              <span className="kg-ich-gnm">{it.name}</span>
-                              {it.days && it.days.length > 0 && (
-                                <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.12em", color: "#C58A16",
-                                  background: "#FFF5DE", borderRadius: R_PILL, padding: "1px 7px", whiteSpace: "nowrap" }}>
-                                  {it.days.map(dd => DAY_ABBR[dd] || "").filter(Boolean).join("·")}
-                                </span>
-                              )}
-                              {it.qty ? (
-                                <span style={{ fontSize: 13, fontWeight: 800, color: SAKURA_DP, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
-                                  {fmtQty(it.qty)} {it.unit}
-                                </span>
-                              ) : null}
-                            </label>
-                          );
-                        })}
-                      </div>
-                    ))}
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 16, paddingTop: 12, borderTop: `1px solid ${LINE}` }}>
-                      <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.2em", color: INK_SOFT }}>WEEKLIJST · {servings}P · JUMBO GENT</span>
-                      <span style={{ fontSize: 14, fontWeight: 800, color: INK, fontVariantNumeric: "tabular-nums" }}>{checkedCount} / {shoppingList.length}</span>
-                    </div>
-                    <p style={{ fontSize: 12.5, color: INK_SOFT, margin: "10px 0 0", lineHeight: 1.6 }}>
-                      Samengevoegd per ingrediënt (eenheid-bewust), geschaald naar {servings} porties.
-                    </p>
-                  </>
-                )}
-              </section>
-
-              {/* winkelroute chip strip + floorplan modal launcher */}
-              <section style={{ background: CARD, borderRadius: R_LG, padding: "22px 24px", boxShadow: SHADOW_SOFT }}>
-                <SecTag onCard k="路" label="Winkelroute" right="JUMBO FOODMARKT GENT" />
-                {route.stops.length === 0 ? (
-                  <p style={{ fontSize: 14, color: INK_SOFT, margin: 0, lineHeight: 1.6 }}>
-                    Zodra je lijst gevuld is, tekent Ichikawa hier de kortste ronde door de winkel. 🐾
-                  </p>
-                ) : (
-                  <>
-                    <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-                      <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: "0.1em", color: INK_SOFT,
-                        border: `2px dashed ${LINE}`, borderRadius: R_PILL, padding: "4px 11px" }}>🚪 INGANG</span>
-                      {route.stops.map((s, i) => (
-                        <span key={s.zone.id} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-                          <span aria-hidden="true" style={{ color: "#C7A98F", fontWeight: 800 }}>→</span>
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 800,
-                            letterSpacing: "0.06em", color: INK, background: RICE, borderRadius: R_PILL, padding: "4px 11px", boxShadow: SHADOW_SOFT }}>
-                            <span style={{ color: MATCHA_DP, fontVariantNumeric: "tabular-nums" }}>{String(i + 1).padStart(2, "0")}</span>
-                            {s.zone.emoji} {s.zone.label}
-                          </span>
-                        </span>
-                      ))}
-                      <span aria-hidden="true" style={{ color: "#C7A98F", fontWeight: 800 }}>→</span>
-                      <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: "0.1em", color: INK_SOFT,
-                        border: `2px dashed ${LINE}`, borderRadius: R_PILL, padding: "4px 11px" }}>🛒 KASSA'S</span>
-                    </div>
-                    <p style={{ fontSize: 12.5, color: INK_SOFT, margin: "12px 0 0", lineHeight: 1.6, borderLeft: `3px solid ${BLUSH}`, paddingLeft: 12 }}>
-                      Gesorteerd op looprichting: vers eerst, diepvries als laatste. Eén rondje, geen teruglopen.
-                    </p>
-                    <button className="kg-ich-btn" onClick={() => setShowRoute(true)}
-                      style={{ width: "100%", marginTop: 14, background: `linear-gradient(150deg, ${SAKURA}, ${AZUKI})`,
-                        color: "#fff", border: "none", borderRadius: R_PILL, fontSize: 14.5, fontWeight: 800,
-                        padding: "12px 20px", boxShadow: "0 8px 18px rgba(214,91,120,.34)" }}>
-                      🗺️ Bekijk plattegrond · Jumbo Gent
-                    </button>
-                  </>
-                )}
-              </section>
-            </div>
-          </div>
-
-          {/* ═══ RECEPTENBIBLIOTHEEK — the picker that fills the weekmenu ═══ */}
-          <section ref={libRef} style={{ scrollMarginTop: 12 }}>
-          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 4 }}>
-            <div>
-              <div style={{ fontSize: 13.5, letterSpacing: "0.2em", textTransform: "uppercase", color: SAKURA_DP, fontWeight: 800 }}>
-                Recepten­bibliotheek
-              </div>
-              <h2 style={{ fontFamily: F_DISPLAY, fontSize: 28, fontWeight: 800, color: G_TEXT, margin: "2px 0 0" }}>
-                Kies je gerechten
-              </h2>
-            </div>
-            <span style={{ fontSize: 14, color: G_MUTED, fontWeight: 600 }}>{loaded ? `${shown.length} recepten` : "laden…"}</span>
-          </div>
-          <p style={{ fontSize: 14, color: G_MUTED, margin: "6px 0 18px" }}>
-            Kies tot {MAX_DINNERS} diners voor je week (hetzelfde gerecht mag meerdere dagen).
-            Het weekmenu, de boodschappenlijst en de looproute hierboven groeien mee. 🍱
-          </p>
-
-          {/* keyword search */}
-          <div style={{ position: "relative", marginBottom: 16 }}>
-            <span aria-hidden="true" style={{ position: "absolute", left: 16, top: "50%",
-              transform: "translateY(-50%)", fontSize: 15, pointerEvents: "none" }}>🔍</span>
-            <input type="text" className="kg-ich-search-input" value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Zoek op naam, ingrediënt of tag…" />
-            {search && (
-              <button className="kg-ich-btn" onClick={() => setSearch("")} aria-label="zoekopdracht wissen"
-                style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
-                  width: 26, height: 26, borderRadius: "50%", border: "none", background: "transparent",
-                  color: INK_SOFT, fontSize: 14, lineHeight: 1 }}>
-                ✕
-              </button>
-            )}
-          </div>
-
-          {/* main-ingredient filter chips (meat / chicken / fish / veg) */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-            <span style={{ fontSize: 13.5, fontWeight: 800, color: G_MUTED, marginRight: 2 }}>🍽️ Soort</span>
-            {CATEGORY_FILTERS.map(c => {
-              const on = cat === c.key;
-              return (
-                <button key={c.key} className="kg-ich-chip" onClick={() => setCat(c.key)}
-                  style={{ background: on ? SAKURA : "#fff", border: "none", borderRadius: R_PILL,
-                    color: on ? "#fff" : INK_SOFT, fontSize: 14, fontWeight: 800, padding: "8px 15px",
-                    boxShadow: on ? "0 6px 14px rgba(242,109,139,.30)" : SHADOW_SOFT }}>
-                  {c.emoji ? `${c.emoji} ${c.label}` : c.label}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* tag filter chips */}
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-            {tags.map(t => {
-              const on = tag === t;
-              return (
-                <button key={t} className="kg-ich-chip" onClick={() => setTag(t)}
-                  style={{ background: on ? SAKURA : "#fff", border: "none", borderRadius: R_PILL,
-                    color: on ? "#fff" : INK_SOFT, fontSize: 14, fontWeight: 800, padding: "8px 15px",
-                    boxShadow: on ? "0 6px 14px rgba(242,109,139,.30)" : SHADOW_SOFT }}>
-                  {t === "all" ? "Alle" : t}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* time filter chips */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 22 }}>
-            <span style={{ fontSize: 13.5, fontWeight: 800, color: G_MUTED, marginRight: 2 }}>⏱ Bereidingstijd</span>
-            {TIME_BUCKETS.map(b => {
-              const on = timeMax === b.max;
-              return (
-                <button key={b.key} className="kg-ich-chip" onClick={() => setTimeMax(b.max)}
-                  style={{ background: on ? MATCHA : "#fff", border: "none", borderRadius: R_PILL,
-                    color: on ? "#fff" : INK_SOFT, fontSize: 14, fontWeight: 800, padding: "8px 15px",
-                    boxShadow: on ? "0 6px 14px rgba(95,174,119,.30)" : SHADOW_SOFT }}>
-                  {b.label}
-                </button>
-              );
-            })}
-          </div>
-
-          {removeNote && (
-            <div style={{ background: "#FFF0E6", color: SAKURA_DP, fontSize: 14, fontWeight: 700,
-              borderRadius: R_MD, padding: "10px 16px", marginBottom: 18, boxShadow: SHADOW_SOFT }}>
-              {removeNote}
-            </div>
-          )}
-
-          {!loaded && (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, padding: "56px 0", color: G_MUTED }}>
-              <Mascot type="matcha" size={78} />
-              <span style={{ fontSize: 15, fontWeight: 700 }}>Matcha-kun haalt de recepten op…</span>
-            </div>
-          )}
-          {loaded && shown.length === 0 && (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "56px 0", color: G_MUTED }}>
-              <Mascot type="onigiri" size={72} bob={false} />
-              <span style={{ fontSize: 15, fontWeight: 700 }}>Geen recepten gevonden 🍙</span>
-            </div>
-          )}
-
-          {/* recipe grid */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 16 }}>
-            {shown.map(r => {
-              const count  = countOf(r.id);
-              const inPlan = count > 0;
-              const full   = selected.length >= MAX_DINNERS;
-              const cz     = cuisineOf(r.cuisine);
-              const time   = r.totalTime || r.prepTime;
-              return (
-                <article key={r.id} className="kg-ich-card"
-                  style={{ background: CARD, borderRadius: R_LG, overflow: "hidden",
-                    display: "flex", flexDirection: "column",
-                    boxShadow: inPlan ? `0 0 0 3px ${SAKURA}, ${SHADOW_SOFT}` : SHADOW_SOFT }}>
-                  {/* real HelloFresh photo; falls back to the pastel emoji placeholder if absent/broken */}
-                  <div style={{ position: "relative", height: 118, overflow: "hidden",
-                    background: `linear-gradient(150deg, ${cz.a}, ${cz.b})`,
-                    display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <span style={{ fontSize: 60, filter: "drop-shadow(0 4px 8px rgba(150,110,80,.25))" }}>{cz.emoji}</span>
-                    {r.image && (
-                      <img src={r.image} alt={r.title} loading="lazy"
-                        onError={e => { e.currentTarget.style.display = "none"; }}
-                        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
-                    )}
-                    <span style={{ position: "absolute", top: 12, left: 12, fontSize: 13.5, fontWeight: 800,
-                      color: INK, background: "rgba(255,255,255,.82)", borderRadius: R_PILL, padding: "4px 11px",
-                      boxShadow: SHADOW_SOFT }}>⏱ {time}′</span>
-                    {/* add / count control — in plan? a [− N +] stepper so the same
-                        dish can fill several days; otherwise a single + to add it */}
-                    {inPlan ? (
-                      <div style={{ position: "absolute", top: 10, right: 10, display: "flex", alignItems: "center",
-                        gap: 6, background: SAKURA, borderRadius: R_PILL, padding: "4px 6px", boxShadow: SHADOW_SOFT }}>
-                        <button className="kg-ich-btn" onClick={() => removeOneOf(r.id)}
-                          title="Eén dag minder" aria-label={`Eén "${r.title}" uit bento`}
-                          style={{ width: 26, height: 26, borderRadius: "50%", border: "none", background: "rgba(255,255,255,.9)",
-                            color: AZUKI, fontSize: 17, fontWeight: 800, lineHeight: 1, cursor: "pointer" }}>–</button>
-                        <span style={{ minWidth: "1.2ch", textAlign: "center", color: "#fff", fontSize: 14, fontWeight: 800,
-                          fontVariantNumeric: "tabular-nums" }}>{count}</span>
-                        <button className="kg-ich-btn" onClick={() => addToPlan(r.id)} disabled={full}
-                          title={full ? `Max ${MAX_DINNERS} diners` : "Nog een dag"} aria-label={`Nog een "${r.title}" in bento`}
-                          style={{ width: 26, height: 26, borderRadius: "50%", border: "none",
-                            background: full ? "rgba(255,255,255,.5)" : "rgba(255,255,255,.9)",
-                            color: full ? "#D8907F" : SAKURA_DP, fontSize: 17, fontWeight: 800, lineHeight: 1,
-                            cursor: full ? "not-allowed" : "pointer" }}>+</button>
-                      </div>
-                    ) : (
-                      <button className="kg-ich-btn" onClick={() => addToPlan(r.id)} disabled={full}
-                        title={full ? `Max ${MAX_DINNERS} diners` : "In m'n bento"}
-                        style={{ position: "absolute", top: 10, right: 10, width: 38, height: 38, borderRadius: "50%",
-                          border: "none", background: "#fff",
-                          color: full ? "#D8C4B0" : SAKURA_DP, fontSize: 20, lineHeight: 1, fontWeight: 800,
-                          boxShadow: SHADOW_SOFT, cursor: full ? "not-allowed" : "pointer", opacity: full ? 0.6 : 1 }}>
-                        +
-                      </button>
-                    )}
-                  </div>
-                  {/* body — dense: full title only */}
-                  <div style={{ padding: "10px 12px 12px", display: "flex", alignItems: "flex-start",
-                    justifyContent: "space-between", gap: 6, flex: 1 }}>
-                    <h3 className="kg-ich-title" onClick={() => setDetail(r)}
-                      style={{ fontFamily: F_DISPLAY, fontSize: 15, fontWeight: 800, color: INK, lineHeight: 1.25, margin: 0 }}>
-                      {r.title}
-                    </h3>
-                    <button className="kg-ich-btn kg-ich-remove" onClick={() => handleRemove(r)}
-                      title="Verwijderen" aria-label={`"${r.title}" verwijderen`}>
-                      ×
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-          </section>
+            {deskSide === "cook" ? renderKook() : renderShop()}
+          </aside>
         </div>
-      </div>
+      ) : (
+        /* ── mode pane — each mode is its own one-thumb page ── */
+        <div ref={mainRef} style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+          {mode === "plan" ? renderPlan() : mode === "shop" ? renderShop() : renderKook()}
+        </div>
+      )}
 
-      {/* ── Recipe detail modal (with Cooking mode timeline) ── */}
-      {detail && <RecipeModal recipe={detail} servings={servings} count={countOf(detail.id)}
+      {/* ── mode nav — thumb-reachable, persisted (phone only: the desk shows
+             every job at once, so there is nothing to switch) ── */}
+      {!wide && (
+      <nav aria-label="Ichikawa modes" style={{ flexShrink: 0, position: "relative", zIndex: 2, display: "flex", gap: 8,
+        padding: "9px 12px", paddingBottom: "max(9px, env(safe-area-inset-bottom))",
+        background: CARD, borderTop: `1px solid ${LINE}`, boxShadow: "0 -6px 18px rgba(206,150,116,.14)" }}>
+        {MODES.map(m => {
+          const on = mode === m.id;
+          const badge = navBadge[m.id];
+          return (
+            <button key={m.id} className="kg-ich-btn" onClick={() => setMode(m.id)} aria-pressed={on}
+              style={{ flex: 1, minHeight: 56, borderRadius: R_MD, border: "none",
+                background: on ? SAKURA : "transparent", color: on ? "#fff" : INK_SOFT,
+                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3,
+                fontWeight: 800, boxShadow: on ? "0 8px 18px rgba(242,109,139,.32)" : "none" }}>
+              <span style={{ fontSize: 19, lineHeight: 1 }}>{m.k}</span>
+              <span style={{ fontSize: 10.5, letterSpacing: "0.14em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+                {m.label}{badge ? ` · ${badge}` : ""}
+              </span>
+            </button>
+          );
+        })}
+      </nav>
+      )}
+
+      {/* ── toast — absolute child of the root (works in both mounts) ── */}
+      {removeNote && (
+        <div role="status" style={{ position: "absolute", left: 16, right: 16, bottom: 96, zIndex: 90,
+          background: "#FFF0E6", color: SAKURA_DP, fontSize: 14, fontWeight: 700, textAlign: "center",
+          borderRadius: R_MD, padding: "11px 16px", boxShadow: SHADOW_LIFT, animation: "ichPop .2s ease" }}>
+          {removeNote}
+        </div>
+      )}
+
+      {/* ── recipe card sheet ── */}
+      {detail && <RecipeSheet recipe={detail} servings={servings} count={countOf(detail.id)}
         canAdd={selected.length < MAX_DINNERS} onAdd={() => addToPlan(detail.id)}
         onRemoveOne={() => removeOneOf(detail.id)} onClose={() => setDetail(null)} />}
 
-      {/* ── Route map modal — shopping list re-ordered along the Jumbo Gent path ── */}
-      {showRoute && <RouteModal items={shoppingList} servings={servings} onClose={() => setShowRoute(false)} />}
+      {/* ── store floorplan sheet — shares the persisted ticks with SHOP ── */}
+      {showRoute && <RouteSheet items={shoppingList} servings={servings}
+        checked={aisleChecked} onToggle={toggleAisle} onClose={() => setShowRoute(false)} />}
     </div>
   );
 }
 
-// Recipe detail modal — Cooking mode (time-oriented) on top, then ingredients.
-function RecipeModal({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, onClose }) {
+// ─── Recipe card sheet — bottom sheet with the full cooking-mode detail ──────
+// position:absolute child of the root (NOT fixed) so it works identically in
+// the desktop takeover and inside MobileShell's visualViewport-sized area.
+function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, onClose }) {
   useEffect(() => {
     const onKey = e => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -1193,84 +1563,85 @@ function RecipeModal({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
   const passiveFlex = t.passive;
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(75,59,66,.42)",
-      display: "flex", alignItems: "center", justifyContent: "center", padding: 24, animation: "ichFade .18s ease" }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: 700, maxWidth: "100%", maxHeight: "90vh", background: CARD,
-        borderRadius: R_LG, overflow: "hidden", display: "flex", flexDirection: "column",
-        animation: "ichPop .2s ease", boxShadow: "0 26px 70px rgba(150,110,80,.40)", fontFamily: F_ROUND, color: INK }}>
-        {/* modal header — pastel food banner */}
-        <div style={{ position: "relative", padding: "20px 24px",
-          background: `linear-gradient(150deg, ${cz.a}, ${cz.b})` }}>
+    <div onClick={onClose} className="kg-ich-overlay" style={{ position: "absolute", inset: 0, zIndex: 80, background: "rgba(75,59,66,.42)",
+      display: "flex", alignItems: "flex-end", justifyContent: "center", animation: "ichFade .18s ease" }}>
+      <div onClick={e => e.stopPropagation()} role="dialog" aria-label={r.title} className="kg-ich-sheet"
+        style={{ width: "100%", maxWidth: 560, maxHeight: "92%", background: CARD,
+          borderRadius: `${R_LG}px ${R_LG}px 0 0`, overflow: "hidden", display: "flex", flexDirection: "column",
+          animation: "ichSheet .22s ease", boxShadow: "0 -18px 60px rgba(150,110,80,.38)", fontFamily: F_ROUND, color: INK }}>
+        {/* sheet header — pastel food banner + drag handle */}
+        <div style={{ position: "relative", padding: "10px 20px 16px", background: `linear-gradient(150deg, ${cz.a}, ${cz.b})` }}>
+          <div aria-hidden="true" className="kg-ich-grab" style={{ width: 44, height: 5, borderRadius: 3, background: "rgba(91,71,80,.28)", margin: "0 auto 10px" }} />
           <button className="kg-ich-btn" onClick={onClose} aria-label="sluiten"
-            style={{ position: "absolute", top: 14, right: 16, width: 34, height: 34, borderRadius: "50%",
+            style={{ position: "absolute", top: 14, right: 14, width: 36, height: 36, borderRadius: "50%",
               background: "rgba(255,255,255,.85)", border: "none", color: INK, fontSize: 16, lineHeight: 1,
               fontWeight: 800, boxShadow: SHADOW_SOFT }}>✕</button>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <span style={{ fontSize: 46, filter: "drop-shadow(0 4px 8px rgba(150,110,80,.25))" }}>{cz.emoji}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 38, filter: "drop-shadow(0 4px 8px rgba(150,110,80,.25))" }}>{cz.emoji}</span>
             <div style={{ minWidth: 0, paddingRight: 40 }}>
-              <h2 style={{ fontFamily: F_DISPLAY, fontSize: 22, fontWeight: 800, color: INK, lineHeight: 1.2, margin: 0 }}>{r.title}</h2>
-              <div style={{ fontSize: 14, color: "rgba(91,71,80,.8)", marginTop: 3, fontWeight: 600 }}>{r.subtitle}</div>
+              <h2 style={{ fontFamily: F_DISPLAY, fontSize: 19, fontWeight: 800, color: INK, lineHeight: 1.25, margin: 0 }}>{r.title}</h2>
+              {r.subtitle && <div style={{ fontSize: 13, color: "rgba(91,71,80,.8)", marginTop: 2, fontWeight: 600 }}>{r.subtitle}</div>}
             </div>
           </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 13.5, fontWeight: 800, color: SAKURA_DP, background: "rgba(255,255,255,.7)", borderRadius: R_PILL, padding: "4px 12px" }}>{r.cuisine}</span>
-            <span style={{ fontSize: 13.5, fontWeight: 800, color: INK, background: "rgba(255,255,255,.7)", borderRadius: R_PILL, padding: "4px 12px" }}>👥 {servings} porties</span>
+          <div style={{ display: "flex", gap: 7, marginTop: 12, flexWrap: "wrap" }}>
+            {r.cuisine && <span style={{ fontSize: 12.5, fontWeight: 800, color: SAKURA_DP, background: "rgba(255,255,255,.7)", borderRadius: R_PILL, padding: "3px 11px" }}>{r.cuisine}</span>}
+            <span style={{ fontSize: 12.5, fontWeight: 800, color: INK, background: "rgba(255,255,255,.7)", borderRadius: R_PILL, padding: "3px 11px" }}>👥 {servings} porties</span>
             {(r.tags || []).map(t2 => (
-              <span key={t2} style={{ fontSize: 13.5, fontWeight: 700, color: INK_SOFT, background: "rgba(255,255,255,.55)", borderRadius: R_PILL, padding: "4px 12px" }}>{t2}</span>
+              <span key={t2} style={{ fontSize: 12.5, fontWeight: 700, color: INK_SOFT, background: "rgba(255,255,255,.55)", borderRadius: R_PILL, padding: "3px 11px" }}>{t2}</span>
             ))}
           </div>
         </div>
 
-        {/* modal body */}
-        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "22px 24px 24px",
-          display: "flex", flexDirection: "column", gap: 18 }}>
+        {/* sheet body */}
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "18px 20px 20px",
+          display: "flex", flexDirection: "column", gap: 16 }}>
 
           {/* ── COOKING MODE ── */}
           <div style={{ fontFamily: F_DISPLAY, fontSize: 15, fontWeight: 800, color: MATCHA_DP,
             display: "flex", alignItems: "center", gap: 8 }}>
-            🔥 Cooking mode <span style={{ fontFamily: F_ROUND, fontSize: 13.5, fontWeight: 600, color: INK_SOFT }}>: elke fase, elke minuut</span>
+            🔥 Cooking mode <span style={{ fontFamily: F_ROUND, fontSize: 13, fontWeight: 600, color: INK_SOFT }}>: elke fase, elke minuut</span>
           </div>
 
           {/* total + split bar */}
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
             <div>
-              <div style={{ fontSize: 13.5, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: INK_SOFT }}>Totale tijd</div>
-              <div style={{ fontFamily: F_DISPLAY, fontSize: 38, fontWeight: 800, color: SAKURA_DP, lineHeight: 1 }}>
-                {t.total}<span style={{ fontFamily: F_ROUND, fontSize: 14, fontWeight: 600, color: INK_SOFT }}> min</span>
+              <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: INK_SOFT }}>Totale tijd</div>
+              <div style={{ fontFamily: F_DISPLAY, fontSize: 34, fontWeight: 800, color: SAKURA_DP, lineHeight: 1 }}>
+                {t.total}<span style={{ fontFamily: F_ROUND, fontSize: 13, fontWeight: 600, color: INK_SOFT }}> min</span>
               </div>
             </div>
             <div role="img" aria-label={`${t.active} minuten actief, ${t.passive} minuten wachten`}
-              style={{ display: "flex", gap: 4, flex: 1, minWidth: 240, height: 44, borderRadius: R_PILL,
+              style={{ display: "flex", gap: 4, flex: 1, minWidth: 200, height: 40, borderRadius: R_PILL,
                 overflow: "hidden", boxShadow: SHADOW_SOFT }}>
               <div style={{ flex: activeFlex, background: SAKURA, display: "flex", alignItems: "center", justifyContent: "center",
-                color: "#fff", fontSize: 13.5, fontWeight: 800, whiteSpace: "nowrap" }}>{t.active}′ actief</div>
+                color: "#fff", fontSize: 12.5, fontWeight: 800, whiteSpace: "nowrap" }}>{t.active}′ actief</div>
               {passiveFlex > 0 && (
                 <div style={{ flex: passiveFlex, background: RAMUNE, display: "flex", alignItems: "center", justifyContent: "center",
-                  color: "#2E6E77", fontSize: 13.5, fontWeight: 800, whiteSpace: "nowrap" }}>{t.passive}′ wachten</div>
+                  color: "#2E6E77", fontSize: 12.5, fontWeight: 800, whiteSpace: "nowrap" }}>{t.passive}′ wachten</div>
               )}
             </div>
           </div>
 
           {/* parallel-work tip */}
           {t.tip && (
-            <div style={{ background: "#FFF7E6", borderRadius: R_MD, padding: "13px 16px", fontSize: 14, color: INK,
+            <div style={{ background: "#FFF7E6", borderRadius: R_MD, padding: "12px 15px", fontSize: 13.5, color: INK,
               boxShadow: SHADOW_SOFT, lineHeight: 1.5 }}>
               💡 <b style={{ color: SAKURA_DP }}>Parallel:</b> {t.tip}
             </div>
           )}
 
           {/* per-phase step timeline */}
-          <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+          <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 9 }}>
             {t.steps.map((s, i) => {
               const passive = s.mode === "passive";
               return (
-                <li key={i} style={{ display: "flex", alignItems: "flex-start", gap: 14, background: RICE,
-                  borderRadius: R_MD, padding: "12px 14px" }}>
-                  <span style={{ flex: "0 0 auto", width: 30, height: 30, borderRadius: "50%", background: MATCHA,
-                    color: "#fff", fontWeight: 800, fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
-                  <span style={{ flex: 1, fontSize: 14.5, fontWeight: 600, color: INK, lineHeight: 1.4, whiteSpace: "pre-wrap" }}>{s.text}</span>
+                <li key={i} style={{ display: "flex", alignItems: "flex-start", gap: 12, background: RICE,
+                  borderRadius: R_MD, padding: "11px 13px" }}>
+                  <span style={{ flex: "0 0 auto", width: 28, height: 28, borderRadius: "50%", background: MATCHA,
+                    color: "#fff", fontWeight: 800, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
+                  <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: INK, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{s.text}</span>
                   {s.minutes != null && (
-                    <span style={{ flex: "0 0 auto", fontSize: 14, fontWeight: 800, padding: "6px 12px", borderRadius: R_PILL,
+                    <span style={{ flex: "0 0 auto", fontSize: 13, fontWeight: 800, padding: "5px 11px", borderRadius: R_PILL,
                       whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums",
                       background: passive ? "#E4F3F5" : "#FFE3EA", color: passive ? RAMUNE_DP : SAKURA_DP }}>
                       {s.minutes}′{passive ? " wachten" : ""}
@@ -1280,16 +1651,16 @@ function RecipeModal({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
               );
             })}
           </ol>
-          <p style={{ fontSize: 13.5, color: INK_SOFT, margin: 0, lineHeight: 1.6 }}>
+          <p style={{ fontSize: 13, color: INK_SOFT, margin: 0, lineHeight: 1.6 }}>
             <b style={{ color: INK }}>Roze = handen bezig, blauw = je bent vrij.</b> Per-fase tijden zijn een schatting uit het recept, pas ze gerust aan.
           </p>
 
           {/* ── INGREDIËNTEN ── */}
-          <div style={{ fontFamily: F_DISPLAY, fontSize: 15, fontWeight: 800, color: MATCHA_DP, marginTop: 4 }}>🧂 Ingrediënten</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(210px,1fr))", gap: "4px 20px" }}>
+          <div style={{ fontFamily: F_DISPLAY, fontSize: 15, fontWeight: 800, color: MATCHA_DP, marginTop: 2 }}>🧂 Ingrediënten</div>
+          <div>
             {(r.ingredients || []).map((ing, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 14, color: INK,
-                padding: "8px 0", borderBottom: `1px solid ${LINE}` }}>
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 14, color: INK,
+                minHeight: 40, padding: "4px 0", borderBottom: `1px solid ${LINE}` }}>
                 <span style={{ fontWeight: 600 }}>{ing.name}</span>
                 <span style={{ fontWeight: 800, color: SAKURA_DP, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
                   {fmtQty((Number(ing.qty) || 0) * scale)} {ing.unit}
@@ -1299,11 +1670,12 @@ function RecipeModal({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
           </div>
         </div>
 
-        {/* modal footer */}
-        <div style={{ flexShrink: 0, padding: "16px 24px", borderTop: `1px solid ${LINE}`, display: "flex",
+        {/* sheet footer — add / [− n +] stepper */}
+        <div style={{ flexShrink: 0, padding: "12px 20px", paddingBottom: "max(12px, env(safe-area-inset-bottom))",
+          borderTop: `1px solid ${LINE}`, display: "flex",
           alignItems: "center", justifyContent: inPlan ? "space-between" : "flex-end", gap: 12, background: "#FFFDFB" }}>
           {inPlan && (
-            <span style={{ fontSize: 14, fontWeight: 700, color: INK_SOFT }}>
+            <span style={{ fontSize: 13.5, fontWeight: 700, color: INK_SOFT }}>
               {count}× in je bento{count > 1 ? " · meerdere dagen 🍱" : ""}
             </span>
           )}
@@ -1311,22 +1683,22 @@ function RecipeModal({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
             <div style={{ display: "flex", alignItems: "center", gap: 10, background: SAKURA, borderRadius: R_PILL,
               padding: "6px 8px", boxShadow: SHADOW_SOFT }}>
               <button className="kg-ich-btn" onClick={onRemoveOne} aria-label="één dag minder"
-                style={{ width: 32, height: 32, borderRadius: "50%", border: "none", background: "rgba(255,255,255,.9)",
-                  color: AZUKI, fontSize: 19, fontWeight: 800, lineHeight: 1, cursor: "pointer" }}>–</button>
+                style={{ width: 38, height: 38, borderRadius: "50%", border: "none", background: "rgba(255,255,255,.9)",
+                  color: AZUKI, fontSize: 20, fontWeight: 800, lineHeight: 1, cursor: "pointer" }}>–</button>
               <span style={{ minWidth: "2.2ch", textAlign: "center", color: "#fff", fontSize: 15, fontWeight: 800,
                 fontVariantNumeric: "tabular-nums" }}>{count}</span>
               <button className="kg-ich-btn" onClick={onAdd} disabled={!canAdd}
                 title={canAdd ? "Nog een dag" : `Bento vol (${MAX_DINNERS})`} aria-label="nog een dag"
-                style={{ width: 32, height: 32, borderRadius: "50%", border: "none",
+                style={{ width: 38, height: 38, borderRadius: "50%", border: "none",
                   background: canAdd ? "rgba(255,255,255,.9)" : "rgba(255,255,255,.5)",
-                  color: canAdd ? SAKURA_DP : "#D8907F", fontSize: 19, fontWeight: 800, lineHeight: 1,
+                  color: canAdd ? SAKURA_DP : "#D8907F", fontSize: 20, fontWeight: 800, lineHeight: 1,
                   cursor: canAdd ? "pointer" : "not-allowed" }}>+</button>
             </div>
           ) : (
             <button className="kg-ich-btn" onClick={onAdd} disabled={!canAdd}
               style={{ background: canAdd ? SAKURA : "#F3E6D6", border: "none", borderRadius: R_PILL,
-                color: canAdd ? "#fff" : "#C7A98F", fontSize: 14, fontWeight: 800,
-                padding: "12px 22px", boxShadow: canAdd ? SHADOW_SOFT : "none",
+                color: canAdd ? "#fff" : "#C7A98F", fontSize: 15, fontWeight: 800, minHeight: 48,
+                padding: "12px 24px", boxShadow: canAdd ? SHADOW_SOFT : "none",
                 cursor: canAdd ? "pointer" : "not-allowed" }}>
               {canAdd ? "In m'n bento +" : `Bento vol (${MAX_DINNERS})`}
             </button>
@@ -1399,10 +1771,10 @@ function buildFloorplanSVG(route) {
   return svg + "</svg>";
 }
 
-// Route map modal — the aggregated shopping list re-ordered along the real Jumbo
-// Foodmarkt Gent walking path (fresh perimeter → dry grid → diepvries → kassa).
-function RouteModal({ items, servings, onClose }) {
-  const [checked, setChecked] = useState(() => new Set());
+// ─── Store floorplan sheet — the shopping list along the real Jumbo Gent path ─
+// Ticks are the SAME persisted set as the SHOP checklist (checked/onToggle from
+// the parent), so a tick on the map survives closing the sheet AND a reload.
+function RouteSheet({ items, servings, checked, onToggle, onClose }) {
   useEffect(() => {
     const onKey = e => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -1411,45 +1783,48 @@ function RouteModal({ items, servings, onClose }) {
   const route = useMemo(() => buildRoute(items, STORE), [items]);
   const svg = useMemo(() => buildFloorplanSVG(route), [route]);
   const overig = route.stops.find(s => s.zone.id === "overig");
-  const toggle = key => setChecked(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 85, background: "rgba(75,59,66,.42)",
-      display: "flex", alignItems: "center", justifyContent: "center", padding: 24, animation: "ichFade .18s ease" }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: 1080, maxWidth: "100%", maxHeight: "92vh", background: CARD,
-        borderRadius: R_LG, overflow: "hidden", display: "flex", flexDirection: "column",
-        animation: "ichPop .2s ease", boxShadow: "0 26px 70px rgba(150,110,80,.40)", fontFamily: F_ROUND, color: INK }}>
-        <div style={{ position: "relative", padding: "18px 24px", background: `linear-gradient(150deg, ${SAKURA}, ${AZUKI})`, color: "#fff" }}>
+    <div onClick={onClose} className="kg-ich-overlay" style={{ position: "absolute", inset: 0, zIndex: 85, background: "rgba(75,59,66,.42)",
+      display: "flex", alignItems: "flex-end", justifyContent: "center", animation: "ichFade .18s ease" }}>
+      <div onClick={e => e.stopPropagation()} role="dialog" aria-label="Plattegrond Jumbo Gent" className="kg-ich-sheet"
+        style={{ width: "100%", maxWidth: 640, maxHeight: "94%", background: CARD,
+          borderRadius: `${R_LG}px ${R_LG}px 0 0`, overflow: "hidden", display: "flex", flexDirection: "column",
+          animation: "ichSheet .22s ease", boxShadow: "0 -18px 60px rgba(150,110,80,.38)", fontFamily: F_ROUND, color: INK }}>
+        <div style={{ position: "relative", padding: "10px 20px 14px", background: `linear-gradient(150deg, ${SAKURA}, ${AZUKI})`, color: "#fff" }}>
+          <div aria-hidden="true" className="kg-ich-grab" style={{ width: 44, height: 5, borderRadius: 3, background: "rgba(255,255,255,.45)", margin: "0 auto 10px" }} />
           <button className="kg-ich-btn" onClick={onClose} aria-label="sluiten"
-            style={{ position: "absolute", top: 14, right: 16, width: 34, height: 34, borderRadius: "50%",
-              background: "rgba(255,255,255,.85)", border: "none", color: INK, fontSize: 16, lineHeight: 1, fontWeight: 800 }}>×</button>
-          <div style={{ fontFamily: F_DISPLAY, fontSize: 20, fontWeight: 800 }}>🗺️ Looproute · Jumbo Foodmarkt Gent</div>
-          <div style={{ fontSize: 13.5, opacity: .95, marginTop: 2 }}>
+            style={{ position: "absolute", top: 14, right: 14, width: 36, height: 36, borderRadius: "50%",
+              background: "rgba(255,255,255,.85)", border: "none", color: INK, fontSize: 16, lineHeight: 1, fontWeight: 800 }}>✕</button>
+          <div style={{ fontFamily: F_DISPLAY, fontSize: 18, fontWeight: 800 }}>🗺️ Looproute · Jumbo Foodmarkt Gent</div>
+          <div style={{ fontSize: 13, opacity: .95, marginTop: 2 }}>
             {route.total} items · {route.stops.length} {route.stops.length === 1 ? "halte" : "haltes"} · {servings}p
             {overig ? ` · ${overig.items.length} onbekend ❓` : ""}
           </div>
         </div>
-        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "grid",
-          gridTemplateColumns: "minmax(0,1.35fr) minmax(0,1fr)", gap: 20, padding: 22 }}>
-          <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: R_MD, padding: 12, alignSelf: "start" }}
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14,
+          padding: "16px 16px 20px" }}>
+          <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: R_MD, padding: 10 }}
             dangerouslySetInnerHTML={{ __html: svg }} />
           <div>
             {route.stops.map((s, i) => (
-              <div key={s.zone.id} style={{ border: `1px solid ${LINE}`, borderRadius: 14, padding: "11px 13px", marginBottom: 10, background: "#FFFCF8" }}>
+              <div key={s.zone.id} style={{ border: `1px solid ${LINE}`, borderRadius: 14, padding: "10px 13px", marginBottom: 10, background: "#FFFCF8" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 9, fontWeight: 800, fontFamily: F_DISPLAY, fontSize: 15 }}>
                   <span style={{ flex: "0 0 24px", width: 24, height: 24, borderRadius: "50%", background: SAKURA, color: "#fff",
                     fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 6px rgba(255,157,178,.5)" }}>{i + 1}</span>
                   {s.zone.emoji} {s.zone.label}
                   <span style={{ marginLeft: "auto", fontSize: 12, color: INK_SOFT, fontWeight: 700 }}>{s.items.length}×</span>
                 </div>
-                <ul style={{ margin: "8px 0 0", padding: 0, listStyle: "none" }}>
+                <ul style={{ margin: "4px 0 0", padding: 0, listStyle: "none" }}>
                   {s.items.map((it, j) => {
-                    const key = `${i}_${j}`; const on = checked.has(key);
+                    const key = keyOf(it); const on = checked.has(key);
                     return (
-                      <li key={key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, padding: "3px 0" }}>
-                        <input type="checkbox" checked={on} onChange={() => toggle(key)} style={{ accentColor: MATCHA_DP, width: 15, height: 15 }} />
-                        <span onClick={() => toggle(key)} style={{ flex: 1, cursor: "pointer", color: on ? INK_SOFT : INK, textDecoration: on ? "line-through" : "none" }}>{it.name}</span>
-                        {it.qty ? <span style={{ fontSize: 13, fontWeight: 800, color: SAKURA_DP, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtQty(it.qty)} {it.unit}</span> : null}
+                      <li key={`${key}_${j}`}>
+                        <label className={`kg-ich-gitem${on ? " kg-ich-gitem--on" : ""}`} style={{ minHeight: 46 }}>
+                          <input type="checkbox" checked={on} onChange={() => onToggle(key)} />
+                          <span className="kg-ich-gnm">{it.name}</span>
+                          {it.qty ? <span style={{ fontSize: 13, fontWeight: 800, color: SAKURA_DP, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtQty(it.qty)} {it.unit}</span> : null}
+                        </label>
                       </li>
                     );
                   })}
