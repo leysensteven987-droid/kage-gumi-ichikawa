@@ -56,3 +56,24 @@ pm2 start ecosystem.config.cjs
 ```
 
 Expose it with a Cloudflare Tunnel ingress: `ichikawa.kage-gumi.com → localhost:5273`.
+
+### Auto-deploy
+
+A bare `git pull` is **not** a deploy: the server serves the pre-built `dist/`, so
+without a rebuild + PM2 reload new commits never reach the running app.
+`scripts/autodeploy.sh` closes that gap — it fetches the deploy branch and, only
+when new commits arrived, runs `npm ci` (when deps changed), `npm run build`, and
+`pm2 reload`. It is a cheap no-op when nothing changed and guards against
+overlapping runs, so it is safe on a tight schedule.
+
+Point the box's cron at it instead of a plain pull (the `bash -lc` loads the login
+profile so `node`/`npm`/`pm2` are on `PATH`):
+
+```cron
+*/10 * * * * bash -lc '/opt/kage-gumi-ichikawa/scripts/autodeploy.sh >> /var/log/ichikawa-deploy.log 2>&1'
+```
+
+Deploy branch and PM2 app name are overridable via `ICHIKAWA_DEPLOY_BRANCH`
+(default `main`) and `ICHIKAWA_PM2_APP` (default `kage-gumi-ichikawa`). One-time
+setup on the box: run `scripts/autodeploy.sh` once by hand (or the manual build
+above) to land the first build, then swap the cron line in.
