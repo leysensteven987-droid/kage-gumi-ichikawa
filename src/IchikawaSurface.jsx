@@ -466,6 +466,12 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   const [removedIds, setRemovedIds] = useState(() => new Set()); // soft-removed (optimistic)
   const [removeNote, setRemoveNote] = useState(null); // gentle failure toast
   const [heroIdx, setHeroIdx]   = useState(null);  // pinned "vanavond" slot; null = auto
+  // ── Add-a-recipe-from-URL sheet (works phone + desk; shared renderer)
+  const [addOpen, setAddOpen] = useState(false);   // URL sheet open?
+  const [addUrl, setAddUrl]   = useState("");      // the pasted recipe link
+  const [addBusy, setAddBusy] = useState(false);   // request in flight
+  const [addErr, setAddErr]   = useState(null);    // inline error in the sheet
+  const [addNote, setAddNote] = useState(null);    // success toast
   const libRef  = useRef(null); // scroll target: empty slot / SHOP empty → bibliotheek
   const mainRef = useRef(null); // the mode scroll pane — reset scroll on mode switch
   const searchRef = useRef(null); // desktop '/': focus the library search
@@ -578,6 +584,40 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
       setRemovedIds(prev => { const n = new Set(prev); n.delete(r.id); return n; });
       setRemoveNote(`Kon "${r.title}" niet verwijderen: kaartje teruggezet.`);
       setTimeout(() => setRemoveNote(null), 3500);
+    }
+  }
+
+  // Add a recipe from a pasted URL: POST to the server (schema.org JSON-LD →
+  // corpus JSON), then splice the normalized recipe straight into the library so
+  // it shows without a reload. A re-add un-hides a previously soft-removed card.
+  async function handleAddFromUrl(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const url = addUrl.trim();
+    if (!url || addBusy) return;
+    setAddBusy(true);
+    setAddErr(null);
+    try {
+      const res = await fetch("/api/recipes/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.recipe) throw new Error(data.error || "toevoegen mislukt");
+      const recipe = data.recipe;
+      setRecipes(prev => [recipe, ...prev.filter(r => r.id !== recipe.id)]);
+      setRemovedIds(prev => {
+        if (!prev.has(recipe.id)) return prev;
+        const n = new Set(prev); n.delete(recipe.id); return n;
+      });
+      setAddUrl("");
+      setAddOpen(false);
+      setAddNote(`"${recipe.title}" toegevoegd 🍱`);
+      setTimeout(() => setAddNote(null), 3500);
+    } catch (err) {
+      setAddErr(err.message || "toevoegen mislukt");
+    } finally {
+      setAddBusy(false);
     }
   }
 
@@ -866,6 +906,15 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
           <p style={{ fontSize: 13, color: G_MUTED, margin: "0 0 12px", lineHeight: 1.6 }}>
             Kies tot {MAX_DINNERS} diners voor je week (hetzelfde gerecht mag meerdere dagen). 🍱
           </p>
+
+          {/* add a recipe straight from a link — opens the URL sheet */}
+          <button className="kg-ich-btn" onClick={() => { setAddErr(null); setAddOpen(true); }}
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%",
+              minHeight: 48, marginBottom: 12, background: "#fff", border: `2px dashed ${MATCHA}`,
+              borderRadius: R_LG, color: MATCHA_DP, fontFamily: F_DISPLAY, fontSize: 14.5, fontWeight: 800,
+              boxShadow: SHADOW_SOFT }}>
+            <span style={{ fontSize: 17, lineHeight: 1 }}>＋</span> Recept via URL
+          </button>
 
           {/* keyword search */}
           <div style={{ position: "relative", marginBottom: 12 }}>
@@ -1534,6 +1583,19 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
         </div>
       )}
 
+      {/* ── add-from-URL success toast (matcha) ── */}
+      {addNote && (
+        <div role="status" style={{ position: "absolute", left: 16, right: 16, bottom: 96, zIndex: 90,
+          background: "#EAF7EE", color: MATCHA_DP, fontSize: 14, fontWeight: 700, textAlign: "center",
+          borderRadius: R_MD, padding: "11px 16px", boxShadow: SHADOW_LIFT, animation: "ichPop .2s ease" }}>
+          {addNote}
+        </div>
+      )}
+
+      {/* ── add-a-recipe-from-URL sheet ── */}
+      {addOpen && <AddUrlSheet url={addUrl} setUrl={setAddUrl} busy={addBusy} err={addErr}
+        onSubmit={handleAddFromUrl} onClose={() => { if (!addBusy) { setAddOpen(false); setAddErr(null); } }} />}
+
       {/* ── recipe card sheet ── */}
       {detail && <RecipeSheet recipe={detail} servings={servings} count={countOf(detail.id)}
         canAdd={selected.length < MAX_DINNERS} onAdd={() => addToPlan(detail.id)}
@@ -1704,6 +1766,76 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
             </button>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Add-a-recipe-from-URL sheet ─────────────────────────────────────────────
+// Same bottom-sheet / centered-modal shell as the others (position:absolute so it
+// works in both mounts). Paste a public recipe link → the server pulls its
+// schema.org JSON-LD into the corpus and hands the normalized recipe back.
+function AddUrlSheet({ url, setUrl, busy, err, onSubmit, onClose }) {
+  const inputRef = useRef(null);
+  useEffect(() => {
+    const onKey = e => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  useEffect(() => { if (inputRef.current) inputRef.current.focus(); }, []);
+
+  return (
+    <div onClick={onClose} className="kg-ich-overlay" style={{ position: "absolute", inset: 0, zIndex: 86, background: "rgba(75,59,66,.42)",
+      display: "flex", alignItems: "flex-end", justifyContent: "center", animation: "ichFade .18s ease" }}>
+      <div onClick={e => e.stopPropagation()} role="dialog" aria-label="Recept via URL toevoegen" className="kg-ich-sheet"
+        style={{ width: "100%", maxWidth: 520, maxHeight: "92%", background: CARD,
+          borderRadius: `${R_LG}px ${R_LG}px 0 0`, overflow: "hidden", display: "flex", flexDirection: "column",
+          animation: "ichSheet .22s ease", boxShadow: "0 -18px 60px rgba(150,110,80,.38)", fontFamily: F_ROUND, color: INK }}>
+        {/* header — matcha banner */}
+        <div style={{ position: "relative", padding: "10px 20px 16px", background: `linear-gradient(150deg, ${MATCHA}, ${RAMUNE})`, color: "#fff" }}>
+          <div aria-hidden="true" className="kg-ich-grab" style={{ width: 44, height: 5, borderRadius: 3, background: "rgba(255,255,255,.45)", margin: "0 auto 10px" }} />
+          <button className="kg-ich-btn" onClick={onClose} aria-label="sluiten"
+            style={{ position: "absolute", top: 14, right: 14, width: 36, height: 36, borderRadius: "50%",
+              background: "rgba(255,255,255,.85)", border: "none", color: INK, fontSize: 16, lineHeight: 1, fontWeight: 800 }}>✕</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 30, filter: "drop-shadow(0 4px 8px rgba(60,110,80,.3))" }}>🔗</span>
+            <div>
+              <h2 style={{ fontFamily: F_DISPLAY, fontSize: 18, fontWeight: 800, margin: 0, lineHeight: 1.2 }}>Recept via URL</h2>
+              <div style={{ fontSize: 12.5, opacity: .95, marginTop: 2, fontWeight: 600 }}>Plak een receptlink — ik haal 'm binnen 🍱</div>
+            </div>
+          </div>
+        </div>
+
+        {/* body — the URL field + submit */}
+        <form onSubmit={onSubmit} style={{ padding: "18px 20px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <input ref={inputRef} type="url" inputMode="url" autoComplete="off" autoCapitalize="off" spellCheck={false}
+            className="kg-ich-search-input" value={url} onChange={e => setUrl(e.target.value)}
+            placeholder="https://www.hellofresh.be/recipes/…" disabled={busy}
+            style={{ padding: "12px 16px" }} />
+          {err && (
+            <div role="alert" style={{ background: "#FFECEF", color: AZUKI, fontSize: 13, fontWeight: 700,
+              borderRadius: R_MD, padding: "10px 13px", lineHeight: 1.5 }}>
+              😖 {err}
+            </div>
+          )}
+          <p style={{ fontSize: 12.5, color: G_MUTED, margin: 0, lineHeight: 1.6 }}>
+            Werkt met receptpagina's die een schema.org-recept bevatten (o.a. HelloFresh). Het gerecht landt meteen in je bibliotheek.
+          </p>
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 2 }}>
+            <button type="button" className="kg-ich-btn" onClick={onClose} disabled={busy}
+              style={{ background: "#fff", border: `2px solid ${LINE}`, borderRadius: R_PILL,
+                color: INK_SOFT, fontSize: 14, fontWeight: 800, minHeight: 48, padding: "11px 18px" }}>
+              Annuleer
+            </button>
+            <button type="submit" className="kg-ich-btn" disabled={busy || !url.trim()}
+              style={{ background: busy || !url.trim() ? "#CDE9D5" : MATCHA_DP, border: "none", borderRadius: R_PILL,
+                color: "#fff", fontSize: 14.5, fontWeight: 800, minHeight: 48, padding: "11px 22px",
+                boxShadow: busy || !url.trim() ? "none" : SHADOW_SOFT,
+                cursor: busy || !url.trim() ? "not-allowed" : "pointer" }}>
+              {busy ? "Ophalen…" : "Toevoegen +"}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

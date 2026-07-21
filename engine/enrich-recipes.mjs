@@ -16,7 +16,7 @@
  *   node engine/enrich-recipes.mjs --file urls.txt
  */
 import { chromium } from 'playwright';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
 import { cleanText } from './lib-clean.mjs';
@@ -352,7 +352,7 @@ async function fetchViaBrowser(url) {
   }
 }
 
-async function processUrl(url) {
+export async function processUrl(url) {
   let nodes = [];
   let via = 'fetch';
   try {
@@ -382,7 +382,22 @@ async function processUrl(url) {
   fs.writeFileSync(outPath, JSON.stringify(merged, null, 2) + '\n');
 
   console.error(`[ichikawa] ${url} — OK (${via}) -> ${merged.id}.json`);
-  return merged.id;
+  return merged;
+}
+
+// Close the shared headless browser if it was ever launched (fallback path). A
+// long-running host (the server) can call this to release it between bursts;
+// getBrowser() lazily relaunches on the next fallback.
+export async function closeBrowser() {
+  if (!browserPromise) return;
+  const p = browserPromise;
+  browserPromise = null;
+  try {
+    const browser = await p;
+    await browser.close();
+  } catch {
+    // already gone / never fully launched — nothing to release
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -402,8 +417,8 @@ async function main() {
 
   for (const url of urls) {
     try {
-      const id = await processUrl(url);
-      ok.push(id);
+      const merged = await processUrl(url);
+      ok.push(merged.id);
     } catch (err) {
       console.error(`[ichikawa] ${url} — FAILED: ${err.message}`);
       failed.push({ url, reason: err.message });
@@ -419,7 +434,13 @@ async function main() {
   process.exit(failed.length > 0 && ok.length === 0 ? 1 : 0);
 }
 
-main().catch((err) => {
-  console.error('[ichikawa] Fatal error:', err);
-  process.exit(1);
-});
+// Only run the CLI when invoked directly (`node engine/enrich-recipes.mjs …`);
+// when imported (e.g. by the server's add-from-URL route) the exports above are
+// used and main() stays dormant.
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
+  main().catch((err) => {
+    console.error('[ichikawa] Fatal error:', err);
+    process.exit(1);
+  });
+}

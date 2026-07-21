@@ -42,6 +42,11 @@ npm run enrich    # normalize recipe pages -> data/recipes/<id>.json   (pass URL
 npm run clean     # one-off: re-clean titles/steps across the corpus in place
 ```
 
+The same normalizer is exposed in-app: **RECEPTEN → ＋ Recept via URL** (phone and
+desk) posts a link to `POST /api/recipes/add`, which pulls the page's schema.org
+recipe into `data/recipes/<id>.json` and drops the dish straight into the library —
+no command line needed for a one-off add.
+
 Its data lives under `data/` and is **gitignored**: `data/recipes/` (the corpus),
 `data/.hf-session.json` (saved login), `data/.hf-creds.json` (optional), the browser
 profile, and `data/box-history-urls.txt`. Only the seed and the store map are committed.
