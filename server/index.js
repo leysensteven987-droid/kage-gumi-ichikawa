@@ -12,7 +12,7 @@
 // missing seed degrades to an empty list.
 
 import express from "express";
-import { readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -50,6 +50,29 @@ function loadIchikawaRecipes() {
   return { recipes: [], source: "empty" };
 }
 
+// Coerce a client-supplied ingredient list into clean, safe records before it
+// touches disk. Blank-name rows are dropped, qty becomes a finite number or null,
+// name/unit are trimmed strings. Returns null when the payload isn't an array, or
+// an array (possibly empty) of {name, qty, unit}. Bounded so a bad/huge payload
+// can't bloat a corpus file.
+const MAX_INGREDIENTS = 100;
+const MAX_FIELD = 120;
+function sanitizeIngredients(input) {
+  if (!Array.isArray(input)) return null;
+  const out = [];
+  for (const it of input.slice(0, MAX_INGREDIENTS)) {
+    if (!it || typeof it !== "object") continue;
+    const name = String(it.name ?? "").trim().slice(0, MAX_FIELD);
+    if (!name) continue; // an ingredient with no name is meaningless — skip it
+    const unit = String(it.unit ?? "").trim().slice(0, MAX_FIELD);
+    let qty = it.qty;
+    if (qty === "" || qty == null) qty = null;
+    else { qty = Number(qty); if (!Number.isFinite(qty)) qty = null; }
+    out.push({ name, qty, unit });
+  }
+  return out;
+}
+
 const app = express();
 app.use(express.json());
 
@@ -72,6 +95,46 @@ app.post("/api/recipes/:id/remove", (req, res) => {
     return res.json({ ok: true });
   } catch {
     return res.status(500).json({ error: "failed to remove recipe" });
+  }
+});
+
+// Edit a recipe's ingredient list (swap one out, change a quantity, add a new
+// line). Writes to the recipe's OWN corpus file, never the seed.
+//
+// Seed recipes have no corpus file yet, so the first edit is copy-on-write: the
+// whole currently-served set is materialized into data/recipes/ (the loader flips
+// to corpus-only the moment any file exists, so writing just one would hide the
+// rest of the seed). After that, every recipe is a normal editable corpus file.
+app.put("/api/recipes/:id/ingredients", (req, res) => {
+  const id = req.params.id;
+  if (!id || /[\\/]/.test(id) || id.includes("..")) return res.status(400).json({ error: "invalid id" });
+  const ingredients = sanitizeIngredients(req.body?.ingredients);
+  if (!ingredients) return res.status(400).json({ error: "invalid ingredients" });
+
+  const safeId = (rid) => rid && !/[\\/]/.test(rid) && !rid.includes("..");
+  const file = path.join(RECIPES_DIR, `${id}.json`);
+  try {
+    if (existsSync(file)) {
+      const r = JSON.parse(readFileSync(file, "utf8"));
+      r.ingredients = ingredients;
+      writeFileSync(file, JSON.stringify(r, null, 2));
+      return res.json({ ok: true, ingredients });
+    }
+    // No corpus file — the recipe lives only in the seed. Materialize the served
+    // set (excludes soft-removed recipes already) so nothing disappears, applying
+    // the edit to the target on the way out.
+    const { recipes } = loadIchikawaRecipes();
+    if (!recipes.some((r) => r.id === id)) return res.status(404).json({ error: "recipe not found" });
+    mkdirSync(RECIPES_DIR, { recursive: true });
+    for (const r of recipes) {
+      if (!r || !safeId(r.id)) continue;
+      const f = path.join(RECIPES_DIR, `${r.id}.json`);
+      if (existsSync(f)) continue; // don't clobber a real corpus file
+      writeFileSync(f, JSON.stringify(r.id === id ? { ...r, ingredients } : r, null, 2));
+    }
+    return res.json({ ok: true, ingredients });
+  } catch {
+    return res.status(500).json({ error: "failed to save ingredients" });
   }
 });
 
