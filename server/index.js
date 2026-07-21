@@ -76,12 +76,21 @@ app.post("/api/recipes/add", async (req, res) => {
     return res.status(400).json({ error: "alleen http(s)-links kunnen worden toegevoegd" });
   }
   try {
-    const recipe = await processUrl(url);
+    // Bound the whole fetch+render so a slow/blocking site fails with a message
+    // instead of hanging the request until the browser/tunnel drops it ("Load failed").
+    const recipe = await Promise.race([
+      processUrl(url),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("__timeout__")), 55000)),
+    ]);
     return res.json({ ok: true, recipe });
   } catch (err) {
-    // No Recipe JSON-LD on the page, network/Datadome block, etc. — surface a gentle,
-    // human message; keep the technical reason in the server log.
-    console.error(`[ichikawa] add-from-URL failed for ${url}:`, err?.message || err);
+    const msg = err?.message || String(err);
+    console.error(`[ichikawa] add-from-URL failed for ${url}:`, msg);
+    if (msg === "__timeout__") {
+      return res.status(504).json({ error: "de pagina duurde te lang om te laden — probeer 't opnieuw" });
+    }
+    // No recipe markup, network/Datadome block, etc. — gentle human message; the
+    // technical reason stays in the server log above.
     return res.status(422).json({ error: "geen recept gevonden op die pagina" });
   }
 });

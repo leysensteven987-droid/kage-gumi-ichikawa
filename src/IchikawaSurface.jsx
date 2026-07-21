@@ -1810,7 +1810,7 @@ function AddUrlSheet({ url, setUrl, busy, err, onSubmit, onClose }) {
         <form onSubmit={onSubmit} style={{ padding: "18px 20px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
           <input ref={inputRef} type="url" inputMode="url" autoComplete="off" autoCapitalize="off" spellCheck={false}
             className="kg-ich-search-input" value={url} onChange={e => setUrl(e.target.value)}
-            placeholder="https://www.hellofresh.be/recipes/…" disabled={busy}
+            placeholder="https://… (recept van eender welke site)" disabled={busy}
             style={{ padding: "12px 16px" }} />
           {err && (
             <div role="alert" style={{ background: "#FFECEF", color: AZUKI, fontSize: 13, fontWeight: 700,
@@ -1819,7 +1819,7 @@ function AddUrlSheet({ url, setUrl, busy, err, onSubmit, onClose }) {
             </div>
           )}
           <p style={{ fontSize: 12.5, color: G_MUTED, margin: 0, lineHeight: 1.6 }}>
-            Werkt met receptpagina's die een schema.org-recept bevatten (o.a. HelloFresh). Het gerecht landt meteen in je bibliotheek.
+            Werkt met de meeste receptensites (HelloFresh, Colruyt, Dagelijkse Kost…). Het gerecht landt meteen in je bibliotheek.
           </p>
           <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 2 }}>
             <button type="button" className="kg-ich-btn" onClick={onClose} disabled={busy}
