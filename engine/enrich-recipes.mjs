@@ -16,7 +16,7 @@
  *   node engine/enrich-recipes.mjs --file urls.txt
  */
 import { chromium } from 'playwright';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
 import { cleanText } from './lib-clean.mjs';
@@ -112,12 +112,18 @@ function extractJsonLdNodesFromScriptTexts(texts) {
 }
 
 function findRecipeNode(nodes) {
+  const byType = nodes.find((n) => {
+    if (!n || !n['@type']) return false;
+    const t = n['@type'];
+    return Array.isArray(t) ? t.some((x) => /recipe/i.test(String(x))) : /recipe/i.test(String(t));
+  });
+  if (byType) return byType;
+  // Some sites ship a Recipe with a missing/odd @type but still carry the
+  // schema.org recipe fields — accept a node that clearly IS a recipe.
   return (
-    nodes.find((n) => {
-      if (!n || !n['@type']) return false;
-      const t = n['@type'];
-      return Array.isArray(t) ? t.some((x) => /recipe/i.test(String(x))) : /recipe/i.test(String(t));
-    }) || null
+    nodes.find(
+      (n) => n && (Array.isArray(n.recipeIngredient) || typeof n.recipeIngredient === 'string') && n.name
+    ) || null
   );
 }
 
@@ -142,7 +148,8 @@ function sanitizeId(s) {
     .replace(/^-+|-+$/g, '');
 }
 
-// id: prefer JSON-LD identifier, else the hex-id suffix on the URL slug, else slugify(title)
+// id: prefer JSON-LD identifier, else a descriptive URL slug (HelloFresh hex slug,
+// or any letter-bearing last path segment), else slugify(title).
 function deriveId(urlStr, node, title) {
   const identifier = node?.identifier || node?.recipeId;
   if (identifier && typeof identifier === 'string' && identifier.trim()) {
@@ -151,13 +158,28 @@ function deriveId(urlStr, node, title) {
   try {
     const u = new URL(urlStr);
     const segs = u.pathname.split('/').filter(Boolean);
-    const last = segs[segs.length - 1] || '';
+    const last = decodeURIComponent(segs[segs.length - 1] || '');
     // HelloFresh recipe slugs look like "creamy-garlic-chicken-5f8a1b2c3d4e5f6a7b8c9d0e"
     if (/-[a-f0-9]{6,}$/i.test(last)) return sanitizeId(last);
+    // Any site: a descriptive last segment (has letters, not a bare numeric id) is a
+    // stable, readable id — e.g. Colruyt's "zuiders-pastaslaatje-met-asperges".
+    if (/[a-z]/i.test(last) && last.replace(/\.[a-z0-9]+$/i, '').length >= 3) {
+      return sanitizeId(last.replace(/\.[a-z0-9]+$/i, ''));
+    }
   } catch {
     // invalid URL — fall through to title slug
   }
   return slugify(title);
+}
+
+// source: the site the recipe came from, e.g. "colruyt.be" / "hellofresh.be".
+// Beats hardcoding one origin now that any recipe URL is accepted.
+function deriveSource(urlStr) {
+  try {
+    return new URL(urlStr).hostname.replace(/^www\./i, '') || 'web';
+  } catch {
+    return 'web';
+  }
 }
 
 function parseServings(recipeYield) {
@@ -265,7 +287,7 @@ function normalizeRecipe(node, url) {
 
   return {
     id: deriveId(url, node, title),
-    source: 'hellofresh',
+    source: deriveSource(url),
     title,
     subtitle: node.description ? cleanText(String(node.description)) : null,
     servings: parseServings(node.recipeYield),
@@ -315,7 +337,13 @@ function loadExisting(outPath) {
 // ---------------------------------------------------------------------------
 let browserPromise = null;
 function getBrowser() {
-  if (!browserPromise) browserPromise = chromium.launch({ headless: true });
+  if (!browserPromise) {
+    // Optional pin for the Chromium binary — lets the box point at a system/managed
+    // Chromium when the bundled Playwright browser isn't installed or its version
+    // drifted. Unset → Playwright's default resolution (unchanged behaviour).
+    const executablePath = process.env.ICHIKAWA_CHROMIUM_PATH || undefined;
+    browserPromise = chromium.launch({ headless: true, executablePath });
+  }
   return browserPromise;
 }
 
@@ -332,6 +360,80 @@ async function fetchViaPlainHttp(url) {
   return extractJsonLdNodesFromHtml(html);
 }
 
+// Runs IN the page (via page.evaluate) — no closures over Node scope. Builds a
+// JSON-LD-Recipe-shaped node from schema.org *microdata* (itemprop=…) for sites
+// that don't ship JSON-LD. Returns null when the page has no usable recipe markup.
+function extractMicrodataRecipe() {
+  const scope =
+    document.querySelector('[itemscope][itemtype*="Recipe" i]') ||
+    document.querySelector('[itemtype*="schema.org/Recipe" i]');
+  if (!scope) return null;
+
+  const val = (el) => {
+    if (!el) return null;
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'meta') return el.getAttribute('content');
+    if (tag === 'time') return el.getAttribute('datetime') || el.textContent;
+    if (tag === 'img') return el.getAttribute('src');
+    if (tag === 'a' || tag === 'link') return el.getAttribute('href') || el.textContent;
+    if (el.hasAttribute('content')) return el.getAttribute('content');
+    return (el.textContent || '').trim();
+  };
+  // Only itemprops that belong to THIS recipe item (skip those inside a nested itemscope).
+  const own = (prop) =>
+    Array.from(scope.querySelectorAll('[itemprop~="' + prop + '"]')).filter((el) => {
+      let p = el.parentElement;
+      while (p && p !== scope) {
+        if (p.hasAttribute('itemscope')) return false;
+        p = p.parentElement;
+      }
+      return true;
+    });
+  const first = (prop) => {
+    const e = own(prop)[0];
+    const v = e ? (val(e) || '').toString().trim() : '';
+    return v || null;
+  };
+  const many = (prop) => own(prop).map((e) => (val(e) || '').toString().trim()).filter(Boolean);
+
+  const ingredients = many('recipeIngredient');
+  if (!ingredients.length) ingredients.push(...many('ingredients'));
+
+  let instructions = [];
+  for (const el of own('recipeInstructions')) {
+    const stepText = el.querySelector('[itemprop~="text"]');
+    const t = ((stepText ? val(stepText) : val(el)) || '').toString().trim();
+    if (t) instructions.push(t);
+  }
+  // One giant block → split into steps so they don't render as a single paragraph.
+  if (instructions.length === 1) {
+    instructions = instructions[0].split(/\n+/).map((x) => x.trim()).filter(Boolean);
+  }
+
+  const h1 = document.querySelector('h1');
+  const name = first('name') || (h1 && h1.textContent.trim()) || null;
+  if (!name || !ingredients.length) return null; // not enough to be a real recipe
+
+  const imgEl = own('image')[0];
+  return {
+    '@type': 'Recipe',
+    name,
+    description: first('description'),
+    recipeYield: first('recipeYield') || first('yield'),
+    recipeCuisine: first('recipeCuisine'),
+    keywords: first('keywords'),
+    totalTime: first('totalTime'),
+    prepTime: first('prepTime'),
+    cookTime: first('cookTime'),
+    image: imgEl ? val(imgEl) : null,
+    recipeIngredient: ingredients,
+    recipeInstructions: instructions,
+  };
+}
+
+// Headless render for pages that need JS or block plain fetch. Reads JSON-LD first;
+// if none carries a Recipe, extracts schema.org microdata straight from the DOM.
+// Returns { nodes, microdataNode } so the caller can pick whichever found a recipe.
 async function fetchViaBrowser(url) {
   const browser = await getBrowser();
   const storageState = fs.existsSync(SESSION_FILE) ? SESSION_FILE : undefined;
@@ -339,20 +441,41 @@ async function fetchViaBrowser(url) {
   try {
     const page = await context.newPage();
     try {
-      await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
     } catch {
-      // networkidle can time out on heavy pages — proceed with whatever loaded
+      // heavy/slow page — proceed with whatever loaded rather than hanging
+    }
+    // Give client-rendered structured data a beat to appear (SPA recipe sites
+    // inject JSON-LD/microdata after hydration). Bounded so we never hang.
+    try {
+      await page.waitForFunction(
+        () =>
+          !!document.querySelector('script[type="application/ld+json"]') ||
+          !!document.querySelector('[itemtype*="Recipe" i]'),
+        { timeout: 6000 }
+      );
+    } catch {
+      // nothing showed up in time — read what's there anyway
     }
     const scriptTexts = await page.$$eval('script[type="application/ld+json"]', (els) =>
       els.map((e) => e.textContent || '')
     );
-    return extractJsonLdNodesFromScriptTexts(scriptTexts);
+    const nodes = extractJsonLdNodesFromScriptTexts(scriptTexts);
+    let microdataNode = null;
+    if (!findRecipeNode(nodes)) {
+      try {
+        microdataNode = await page.evaluate(extractMicrodataRecipe);
+      } catch {
+        microdataNode = null;
+      }
+    }
+    return { nodes, microdataNode };
   } finally {
     await context.close();
   }
 }
 
-async function processUrl(url) {
+export async function processUrl(url) {
   let nodes = [];
   let via = 'fetch';
   try {
@@ -365,12 +488,12 @@ async function processUrl(url) {
   if (!recipeNode) {
     via = 'browser';
     console.error(`[ichikawa] ${url} — no Recipe JSON-LD via plain fetch, falling back to headless browser`);
-    nodes = await fetchViaBrowser(url);
-    recipeNode = findRecipeNode(nodes);
+    const out = await fetchViaBrowser(url);
+    recipeNode = findRecipeNode(out.nodes) || out.microdataNode || null;
   }
 
   if (!recipeNode) {
-    throw new Error('no Recipe JSON-LD found (plain fetch + browser fallback both came up empty)');
+    throw new Error('no recipe data found (no schema.org JSON-LD or microdata on the page)');
   }
 
   const fresh = normalizeRecipe(recipeNode, url);
@@ -382,7 +505,22 @@ async function processUrl(url) {
   fs.writeFileSync(outPath, JSON.stringify(merged, null, 2) + '\n');
 
   console.error(`[ichikawa] ${url} — OK (${via}) -> ${merged.id}.json`);
-  return merged.id;
+  return merged;
+}
+
+// Close the shared headless browser if it was ever launched (fallback path). A
+// long-running host (the server) can call this to release it between bursts;
+// getBrowser() lazily relaunches on the next fallback.
+export async function closeBrowser() {
+  if (!browserPromise) return;
+  const p = browserPromise;
+  browserPromise = null;
+  try {
+    const browser = await p;
+    await browser.close();
+  } catch {
+    // already gone / never fully launched — nothing to release
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -402,8 +540,8 @@ async function main() {
 
   for (const url of urls) {
     try {
-      const id = await processUrl(url);
-      ok.push(id);
+      const merged = await processUrl(url);
+      ok.push(merged.id);
     } catch (err) {
       console.error(`[ichikawa] ${url} — FAILED: ${err.message}`);
       failed.push({ url, reason: err.message });
@@ -419,7 +557,13 @@ async function main() {
   process.exit(failed.length > 0 && ok.length === 0 ? 1 : 0);
 }
 
-main().catch((err) => {
-  console.error('[ichikawa] Fatal error:', err);
-  process.exit(1);
-});
+// Only run the CLI when invoked directly (`node engine/enrich-recipes.mjs …`);
+// when imported (e.g. by the server's add-from-URL route) the exports above are
+// used and main() stays dormant.
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
+  main().catch((err) => {
+    console.error('[ichikawa] Fatal error:', err);
+    process.exit(1);
+  });
+}

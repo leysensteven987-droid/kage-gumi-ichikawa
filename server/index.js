@@ -15,6 +15,7 @@ import express from "express";
 import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { processUrl } from "../engine/enrich-recipes.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -79,6 +80,42 @@ app.use(express.json());
 app.get("/api/recipes", (_req, res) => {
   const { recipes, source } = loadIchikawaRecipes();
   res.json({ recipes, source, count: recipes.length });
+});
+
+// Add from URL: fetch a public recipe page (schema.org JSON-LD), normalize it into
+// the corpus shape, and write data/recipes/<id>.json — the same pipeline the
+// `npm run enrich` engine uses, exposed so the app (phone included) can add a recipe
+// without the command line. Returns the normalized recipe so the UI can show it at once.
+app.post("/api/recipes/add", async (req, res) => {
+  const url = typeof req.body?.url === "string" ? req.body.url.trim() : "";
+  if (!url) return res.status(400).json({ error: "geef een recept-URL op" });
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return res.status(400).json({ error: "dat lijkt geen geldige URL" });
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return res.status(400).json({ error: "alleen http(s)-links kunnen worden toegevoegd" });
+  }
+  try {
+    // Bound the whole fetch+render so a slow/blocking site fails with a message
+    // instead of hanging the request until the browser/tunnel drops it ("Load failed").
+    const recipe = await Promise.race([
+      processUrl(url),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("__timeout__")), 55000)),
+    ]);
+    return res.json({ ok: true, recipe });
+  } catch (err) {
+    const msg = err?.message || String(err);
+    console.error(`[ichikawa] add-from-URL failed for ${url}:`, msg);
+    if (msg === "__timeout__") {
+      return res.status(504).json({ error: "de pagina duurde te lang om te laden — probeer 't opnieuw" });
+    }
+    // No recipe markup, network/Datadome block, etc. — gentle human message; the
+    // technical reason stays in the server log above.
+    return res.status(422).json({ error: "geen recept gevonden op die pagina" });
+  }
 });
 
 // Soft-remove: sets keep:false on the recipe's own corpus file (never deletes it, never
