@@ -1,4 +1,5 @@
 /**
+ * @vibe-author STLE @version 6 @date 22JUL26 @comment Recepten krijgt een eigen tab (皿) op mobiel; recept-editor uitgebreid van alleen ingredienten naar volledig (titel/ondertitel/keuken/tags/porties/tijden/parallel-tip/stappen/ingredienten) via PUT /api/recipes/:id
  * @vibe-author STLE @version 5 @date 21JUL26 @comment Weekrandomizer — "Verras me" vult de hele week (MA–ZO) met 6 willekeurige recepten; het gerecht van dinsdag draait door naar woensdag (1× koken, 2× eten). Weekplan opent van 5 werkdagen naar een volledige 7-daagse week.
  * @vibe-author STLE @version 4 @date 21JUL26 @comment Desktop "management desk" — ≥1100px (ONE JS breakpoint) lays PLAN | BIBLIOTHEEK | SHOP·KOOK side-by-side from the same render pieces; phone composition below the breakpoint unchanged
  * @vibe-author STLE @version 3 @date 21JUL26 @comment Port "De dagronde" into the standalone PWA — rewired onto /api/recipes + self-hosted /fonts + root data/ store JSON
@@ -297,6 +298,7 @@ function lsWrite(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); }
 // The three modes — each maps to one real job (couch / aisle / stove).
 const MODES = [
   { id: "plan", k: "献", label: "Plan" },
+  { id: "lib",  k: "皿", label: "Recepten" },
   { id: "shop", k: "買", label: "Shop" },
   { id: "cook", k: "火", label: "Kook" },
 ];
@@ -655,6 +657,37 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     }
   }, [recipes]);
 
+  // Persist a FULL recipe edit (title / tags / porties / tijden / stappen /
+  // ingrediënten — any subset). Optimistic: apply the patch to the in-memory
+  // corpus + the open sheet so everything (timeline, shopping list, header)
+  // re-renders at once, then PUT it. On success adopt the server's sanitized
+  // merged recipe; on failure roll both back and rethrow so the sheet surfaces
+  // the error and keeps the user in edit mode.
+  const handleSaveRecipe = useCallback(async (id, patch) => {
+    const prev = recipes.find(r => r.id === id) || null;
+    setRecipes(rs => rs.map(r => (r.id === id ? { ...r, ...patch } : r)));
+    setDetail(d => (d && d.id === id ? { ...d, ...patch } : d));
+    try {
+      const res = await fetch(`/api/recipes/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = await res.json().catch(() => ({}));
+      if (data && data.recipe) {
+        setRecipes(rs => rs.map(r => (r.id === id ? data.recipe : r)));
+        setDetail(d => (d && d.id === id ? data.recipe : d));
+      }
+    } catch (e) {
+      if (prev) {
+        setRecipes(rs => rs.map(r => (r.id === id ? prev : r)));
+        setDetail(d => (d && d.id === id ? prev : d));
+      }
+      throw e;
+    }
+  }, [recipes]);
+
   // Add a recipe from a pasted URL: POST to the server (schema.org JSON-LD →
   // corpus JSON), then splice the normalized recipe straight into the library so
   // it shows without a reload. A re-add un-hides a previously soft-removed card.
@@ -753,11 +786,15 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     return { total, active, cats };
   }, [selected, byId, catById]);
 
-  // Cross-mode jump: SHOP/KOOK empty states send you to the PLAN bibliotheek.
+  // Jump to the library. On the phone the bibliotheek is its OWN mode tab now, so
+  // just switch to it; on the desk it's an always-visible column, so scroll it in.
   const goPlanLibrary = useCallback(() => {
-    setMode("plan");
-    setTimeout(() => { libRef.current && libRef.current.scrollIntoView({ behavior: "smooth", block: "start" }); }, 80);
-  }, []);
+    if (wide) {
+      libRef.current && libRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      setMode("lib");
+    }
+  }, [wide]);
 
   const PANE = { maxWidth: 560, margin: "0 auto", padding: "18px 16px 30px",
     display: "flex", flexDirection: "column", gap: 18, animation: "ichFade .3s ease" };
@@ -854,7 +891,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
                 const firstEmpty = i === selected.length; // the next slot to fill
                 return (
                   <button key={i} role="listitem" className="kg-ich-btn"
-                    onClick={() => libRef.current && libRef.current.scrollIntoView({ behavior: "smooth", block: "start" })}
+                    onClick={goPlanLibrary}
                     style={{ minHeight: 150, borderRadius: R_MD, border: `2px dashed ${firstEmpty ? SAKURA : G_LINE}`,
                       background: "transparent", padding: "12px 12px", display: "flex", flexDirection: "column", gap: 8,
                       color: firstEmpty ? SAKURA_DP : G_MUTED, textAlign: "left" }}>
@@ -1159,7 +1196,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     );
   }
 
-  // The phone PLAN page — the pieces stacked exactly as before.
+  // The phone PLAN page — pure week-builder now (the library moved to its own 皿 tab).
   function renderPlan() {
     return (
       <div style={PANE}>
@@ -1168,7 +1205,6 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
         {renderWeekRail()}
         {renderPorties()}
         {renderWeekStats()}
-        {renderLibrary()}
       </div>
     );
   }
@@ -1454,6 +1490,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   const shopLeft = shoppingList.length - checkedCount;
   const navBadge = {
     plan: selected.length ? `${selected.length}/${MAX_DINNERS}` : "",
+    lib: loaded ? String(recipes.length) : "",
     shop: shoppingList.length ? (shopLeft > 0 ? `${shopLeft} te gaan` : "✓ klaar") : "",
     cook: heroT ? `${heroT.total}′` : "",
   };
@@ -1634,7 +1671,10 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
       ) : (
         /* ── mode pane — each mode is its own one-thumb page ── */
         <div ref={mainRef} style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-          {mode === "plan" ? renderPlan() : mode === "shop" ? renderShop() : renderKook()}
+          {mode === "plan" ? renderPlan()
+            : mode === "lib" ? <div style={PANE}>{renderLibrary()}</div>
+            : mode === "shop" ? renderShop()
+            : renderKook()}
         </div>
       )}
 
@@ -1654,7 +1694,8 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
                 display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3,
                 fontWeight: 800, boxShadow: on ? "0 8px 18px rgba(242,109,139,.32)" : "none" }}>
               <span style={{ fontSize: 19, lineHeight: 1 }}>{m.k}</span>
-              <span style={{ fontSize: 10.5, letterSpacing: "0.14em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+              <span style={{ fontSize: 10.5, letterSpacing: "0.14em", textTransform: "uppercase", whiteSpace: "nowrap",
+                display: "block", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", textAlign: "center" }}>
                 {m.label}{badge ? ` · ${badge}` : ""}
               </span>
             </button>
@@ -1689,7 +1730,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
       {detail && <RecipeSheet recipe={detail} servings={servings} count={countOf(detail.id)}
         canAdd={selected.length < MAX_DINNERS} onAdd={() => addToPlan(detail.id)}
         onRemoveOne={() => removeOneOf(detail.id)} onClose={() => setDetail(null)}
-        onSaveIngredients={handleSaveIngredients} />}
+        onSaveIngredients={handleSaveIngredients} onSaveRecipe={handleSaveRecipe} />}
 
       {/* ── store floorplan sheet — shares the persisted ticks with SHOP ── */}
       {showRoute && <RouteSheet items={shoppingList} servings={servings}
@@ -1701,50 +1742,107 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
 // ─── Recipe card sheet — bottom sheet with the full cooking-mode detail ──────
 // position:absolute child of the root (NOT fixed) so it works identically in
 // the desktop takeover and inside MobileShell's visualViewport-sized area.
-function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, onClose, onSaveIngredients }) {
-  // Ingredient editing — swap a line out, retune a quantity, or add a new one.
-  // `draft` holds BASE quantities (per r.servings) as strings for controlled
-  // inputs; null means "not editing". Save persists via the parent callback.
-  const [draft, setDraft] = useState(null);
+function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, onClose, onSaveIngredients, onSaveRecipe }) {
+  // Full recipe editing — one unified edit mode covering title/tags/porties/tijden/
+  // stappen/ingrediënten. `form` holds every editable field as controlled strings
+  // (quantities/minuten are BASE amounts per r.servings); null means "not editing".
+  // Save persists the whole patch via the parent onSaveRecipe callback.
+  const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [editErr, setEditErr] = useState("");
-  const editing = draft !== null;
+  const editing = form !== null;
 
   useEffect(() => {
     // While editing, Escape cancels the edit instead of closing the whole sheet.
     const onKey = e => {
       if (e.key !== "Escape") return;
-      if (draft !== null) { setDraft(null); setEditErr(""); }
+      if (form !== null) { setForm(null); setEditErr(""); }
       else onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, draft]);
+  }, [onClose, form]);
 
   const startEdit = () => {
     setEditErr("");
-    setDraft((r.ingredients || []).map(i => ({
-      name: i.name || "", qty: i.qty == null ? "" : String(i.qty), unit: i.unit || "",
-    })));
+    setForm({
+      title:       r.title || "",
+      subtitle:    r.subtitle || "",
+      cuisine:     r.cuisine || "",
+      tags:        (r.tags || []).join(", "),
+      servings:    r.servings == null ? "" : String(r.servings),
+      totalTime:   r.totalTime == null ? "" : String(r.totalTime),
+      activeTime:  r.activeTime == null ? "" : String(r.activeTime),
+      parallelTip: r.parallelTip || "",
+      ingredients: (r.ingredients || []).map(i => ({
+        name: i.name || "", qty: i.qty == null ? "" : String(i.qty), unit: i.unit || "",
+      })),
+      steps: normSteps(r.steps).map(s => ({
+        text: s.text || "", minutes: s.minutes == null ? "" : String(s.minutes),
+        mode: s.mode === "passive" ? "passive" : "active",
+      })),
+    });
   };
-  const cancelEdit = () => { setDraft(null); setEditErr(""); };
-  const setRow = (i, field, val) => setDraft(d => d.map((row, k) => (k === i ? { ...row, [field]: val } : row)));
-  const removeRow = i => setDraft(d => d.filter((_, k) => k !== i));
-  const addRow = () => setDraft(d => [...d, { name: "", qty: "", unit: "" }]);
+  const cancelEdit = () => { setForm(null); setEditErr(""); };
+  const setField = (k, val) => setForm(f => ({ ...f, [k]: val }));
+  // ingredient rows
+  const setIng    = (i, field, val) => setForm(f => ({ ...f, ingredients: f.ingredients.map((row, k) => (k === i ? { ...row, [field]: val } : row)) }));
+  const removeIng = i => setForm(f => ({ ...f, ingredients: f.ingredients.filter((_, k) => k !== i) }));
+  const addIng    = () => setForm(f => ({ ...f, ingredients: [...f.ingredients, { name: "", qty: "", unit: "" }] }));
+  // step rows
+  const setStep    = (i, field, val) => setForm(f => ({ ...f, steps: f.steps.map((row, k) => (k === i ? { ...row, [field]: val } : row)) }));
+  const removeStep = i => setForm(f => ({ ...f, steps: f.steps.filter((_, k) => k !== i) }));
+  const addStep    = () => setForm(f => ({ ...f, steps: [...f.steps, { text: "", minutes: "", mode: "active" }] }));
+  const toggleStepMode = i => setForm(f => ({ ...f, steps: f.steps.map((row, k) => (k === i ? { ...row, mode: row.mode === "passive" ? "active" : "passive" } : row)) }));
+  const moveStep = (i, dir) => setForm(f => {
+    const j = i + dir;
+    if (j < 0 || j >= f.steps.length) return f;
+    const s = f.steps.slice(); [s[i], s[j]] = [s[j], s[i]];
+    return { ...f, steps: s };
+  });
   const saveEdit = async () => {
-    const cleaned = draft
-      .map(row => ({ name: row.name.trim(), qty: row.qty === "" ? null : Number(row.qty), unit: row.unit.trim() }))
-      .filter(row => row.name && (row.qty === null || Number.isFinite(row.qty)));
+    const num = v => {
+      if (v === "" || v == null) return undefined;
+      const n = Number(v); return Number.isFinite(n) && n >= 0 ? n : undefined;
+    };
+    // Partial patch — only send fields that survive sanitizing; numbers left blank
+    // are omitted so a blank field never wipes an existing value on the server.
+    const patch = {
+      title:       form.title.trim(),
+      subtitle:    form.subtitle.trim(),
+      cuisine:     form.cuisine.trim(),
+      parallelTip: form.parallelTip.trim(),
+      tags:        form.tags.split(",").map(t => t.trim()).filter(Boolean),
+      ingredients: form.ingredients
+        .map(row => ({ name: row.name.trim(), qty: row.qty === "" ? null : Number(row.qty), unit: row.unit.trim() }))
+        .filter(row => row.name && (row.qty === null || Number.isFinite(row.qty))),
+      steps: form.steps
+        .map(row => {
+          const m = row.minutes === "" ? null : Number(row.minutes);
+          return { text: row.text.trim(), minutes: (m != null && Number.isFinite(m) && m >= 0) ? m : null,
+            mode: row.mode === "passive" ? "passive" : "active" };
+        })
+        .filter(row => row.text),
+    };
+    const sv = num(form.servings);   if (sv !== undefined) patch.servings = sv;
+    const tt = num(form.totalTime);  if (tt !== undefined) patch.totalTime = tt;
+    const at = num(form.activeTime); if (at !== undefined) patch.activeTime = at;
     setSaving(true); setEditErr("");
     try {
-      await onSaveIngredients(r.id, cleaned);
-      setDraft(null);
+      await onSaveRecipe(r.id, patch);
+      setForm(null);
     } catch {
       setEditErr("Opslaan mislukt — probeer opnieuw.");
     } finally {
       setSaving(false);
     }
   };
+  // Local styles for the edit form fields (kawaii-consistent with the ingredient editor).
+  const fLabel = { fontSize: 12, fontWeight: 800, color: INK_SOFT, letterSpacing: "0.04em", marginBottom: 5, display: "block" };
+  const fInput = { width: "100%", boxSizing: "border-box", fontFamily: F_ROUND, fontSize: 14, fontWeight: 600, color: INK,
+    background: RICE, border: `1px solid ${LINE}`, borderRadius: R_SM, padding: "9px 11px" };
+  const miniBtn = { width: 30, height: 30, borderRadius: "50%", border: "none", background: "#fff", color: INK,
+    fontSize: 14, fontWeight: 800, lineHeight: 1, cursor: "pointer", boxShadow: SHADOW_SOFT };
 
   const scale = servings / (r.servings || servings || 1);
   const cz = cuisineOf(r.cuisine);
@@ -1787,6 +1885,7 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "18px 20px 20px",
           display: "flex", flexDirection: "column", gap: 16 }}>
 
+          {!editing && (<>
           {/* ── COOKING MODE ── */}
           <div style={{ fontFamily: F_DISPLAY, fontSize: 15, fontWeight: 800, color: MATCHA_DP,
             display: "flex", alignItems: "center", gap: 8 }}>
@@ -1845,26 +1944,27 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
           <p style={{ fontSize: 13, color: INK_SOFT, margin: 0, lineHeight: 1.6 }}>
             <b style={{ color: INK }}>Roze = handen bezig, blauw = je bent vrij.</b> Per-fase tijden zijn een schatting uit het recept, pas ze gerust aan.
           </p>
+          </>)}
 
-          {/* ── INGREDIËNTEN ── */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 2 }}>
-            <div style={{ fontFamily: F_DISPLAY, fontSize: 15, fontWeight: 800, color: MATCHA_DP }}>🧂 Ingrediënten</div>
-            {!editing && (
-              <button className="kg-ich-btn" onClick={startEdit} aria-label="Ingrediënten aanpassen"
+          {/* ── INGREDIËNTEN (read-only) heading + edit toggle ── */}
+          {!editing && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 2 }}>
+              <div style={{ fontFamily: F_DISPLAY, fontSize: 15, fontWeight: 800, color: MATCHA_DP }}>🧂 Ingrediënten</div>
+              <button className="kg-ich-btn" onClick={startEdit} aria-label="Recept bewerken"
                 style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, background: "#FFF0F3", border: "none",
                   borderRadius: R_PILL, color: SAKURA_DP, fontSize: 12.5, fontWeight: 800, padding: "6px 13px",
                   boxShadow: SHADOW_SOFT, cursor: "pointer" }}>
-                ✏️ Aanpassen
+                ✏️ Bewerk recept
               </button>
-            )}
-          </div>
+            </div>
+          )}
 
           {!editing ? (
             /* read view — scaled to the porties setting */
             <div>
               {(r.ingredients || []).length === 0 && (
                 <div style={{ fontSize: 13.5, color: INK_SOFT, padding: "8px 0" }}>
-                  Nog geen ingrediënten — tik <b style={{ color: SAKURA_DP }}>Aanpassen</b> om ze toe te voegen.
+                  Nog geen ingrediënten — tik <b style={{ color: SAKURA_DP }}>Bewerk recept</b> om ze toe te voegen.
                 </div>
               )}
               {(r.ingredients || []).map((ing, i) => (
@@ -1878,46 +1978,148 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
               ))}
             </div>
           ) : (
-            /* edit view — BASE quantities (per r.servings), not the scaled amounts */
-            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-              <div style={{ fontSize: 12, color: INK_SOFT, fontWeight: 700 }}>
-                Hoeveelheden per {r.servings || servings} porties. In de boodschappenlijst worden ze naar je porties geschaald.
-              </div>
-              {draft.map((row, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <input value={row.name} onChange={e => setRow(i, "name", e.target.value)} placeholder="ingrediënt"
-                    aria-label={`Naam ingrediënt ${i + 1}`}
-                    style={{ flex: 1, minWidth: 0, fontFamily: F_ROUND, fontSize: 14, fontWeight: 600, color: INK,
-                      background: RICE, border: `1px solid ${LINE}`, borderRadius: R_SM, padding: "9px 11px" }} />
-                  <input value={row.qty} onChange={e => setRow(i, "qty", e.target.value)} placeholder="0" inputMode="decimal"
-                    aria-label={`Hoeveelheid ${i + 1}`}
-                    style={{ width: 58, fontFamily: F_ROUND, fontSize: 14, fontWeight: 800, color: SAKURA_DP, textAlign: "right",
-                      background: RICE, border: `1px solid ${LINE}`, borderRadius: R_SM, padding: "9px 8px",
-                      fontVariantNumeric: "tabular-nums" }} />
-                  <input value={row.unit} onChange={e => setRow(i, "unit", e.target.value)} placeholder="g"
-                    aria-label={`Eenheid ${i + 1}`}
-                    style={{ width: 62, fontFamily: F_ROUND, fontSize: 13, fontWeight: 700, color: INK,
-                      background: RICE, border: `1px solid ${LINE}`, borderRadius: R_SM, padding: "9px 8px" }} />
-                  <button className="kg-ich-btn" onClick={() => removeRow(i)} aria-label={`Verwijder ${row.name || `ingrediënt ${i + 1}`}`}
-                    style={{ flexShrink: 0, width: 32, height: 32, borderRadius: "50%", border: "none", background: "#FFE9EC",
-                      color: AZUKI, fontSize: 15, fontWeight: 800, lineHeight: 1, cursor: "pointer" }}>×</button>
+            /* ── FULL EDITOR — recept-velden + ingrediënten + stappen ── */
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {/* recept-velden */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+                <div>
+                  <label style={fLabel}>Titel</label>
+                  <input value={form.title} onChange={e => setField("title", e.target.value)}
+                    placeholder="Recepttitel" aria-label="Titel" style={{ ...fInput, fontWeight: 800 }} />
                 </div>
-              ))}
-              <button className="kg-ich-btn" onClick={addRow}
-                style={{ alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 7, background: "transparent",
-                  border: `2px dashed ${MATCHA}`, borderRadius: R_PILL, color: MATCHA_DP, fontSize: 13.5, fontWeight: 800,
-                  padding: "8px 16px", cursor: "pointer" }}>
-                ＋ Ingrediënt toevoegen
-              </button>
+                <div>
+                  <label style={fLabel}>Ondertitel</label>
+                  <input value={form.subtitle} onChange={e => setField("subtitle", e.target.value)}
+                    placeholder="Korte omschrijving" aria-label="Ondertitel" style={fInput} />
+                </div>
+                <div style={{ display: "flex", gap: 9 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <label style={fLabel}>Keuken</label>
+                    <input value={form.cuisine} onChange={e => setField("cuisine", e.target.value)}
+                      placeholder="bv. Italiaans" aria-label="Keuken" style={fInput} />
+                  </div>
+                  <div style={{ width: 92, flexShrink: 0 }}>
+                    <label style={fLabel}>Porties</label>
+                    <input value={form.servings} onChange={e => setField("servings", e.target.value)}
+                      inputMode="numeric" placeholder="2" aria-label="Porties"
+                      style={{ ...fInput, textAlign: "center", fontWeight: 800, fontVariantNumeric: "tabular-nums" }} />
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 9 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <label style={fLabel}>Totale tijd (min)</label>
+                    <input value={form.totalTime} onChange={e => setField("totalTime", e.target.value)}
+                      inputMode="numeric" placeholder="30" aria-label="Totale tijd in minuten"
+                      style={{ ...fInput, textAlign: "center", fontVariantNumeric: "tabular-nums" }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <label style={fLabel}>Hands-on (min)</label>
+                    <input value={form.activeTime} onChange={e => setField("activeTime", e.target.value)}
+                      inputMode="numeric" placeholder="15" aria-label="Actieve tijd in minuten"
+                      style={{ ...fInput, textAlign: "center", fontVariantNumeric: "tabular-nums" }} />
+                  </div>
+                </div>
+                <div>
+                  <label style={fLabel}>Tags (komma-gescheiden)</label>
+                  <input value={form.tags} onChange={e => setField("tags", e.target.value)}
+                    placeholder="kip, oven, snel" aria-label="Tags" style={fInput} />
+                </div>
+                <div>
+                  <label style={fLabel}>Parallel-tip</label>
+                  <textarea value={form.parallelTip} onChange={e => setField("parallelTip", e.target.value)}
+                    placeholder="Wat kan tegelijk lopen?" aria-label="Parallel-tip" rows={2}
+                    style={{ ...fInput, resize: "vertical", lineHeight: 1.5 }} />
+                </div>
+              </div>
+
+              {/* ingrediënten */}
+              <div>
+                <div style={{ fontFamily: F_DISPLAY, fontSize: 14, fontWeight: 800, color: MATCHA_DP, marginBottom: 4 }}>🧂 Ingrediënten</div>
+                <div style={{ fontSize: 12, color: INK_SOFT, fontWeight: 700, marginBottom: 9 }}>
+                  Hoeveelheden per {form.servings || r.servings || servings} porties. In de boodschappenlijst worden ze naar je porties geschaald.
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+                  {form.ingredients.map((row, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <input value={row.name} onChange={e => setIng(i, "name", e.target.value)} placeholder="ingrediënt"
+                        aria-label={`Naam ingrediënt ${i + 1}`} style={{ ...fInput, flex: 1, minWidth: 0 }} />
+                      <input value={row.qty} onChange={e => setIng(i, "qty", e.target.value)} placeholder="0" inputMode="decimal"
+                        aria-label={`Hoeveelheid ${i + 1}`}
+                        style={{ ...fInput, width: 58, flexShrink: 0, fontWeight: 800, color: SAKURA_DP, textAlign: "right", padding: "9px 8px", fontVariantNumeric: "tabular-nums" }} />
+                      <input value={row.unit} onChange={e => setIng(i, "unit", e.target.value)} placeholder="g"
+                        aria-label={`Eenheid ${i + 1}`}
+                        style={{ ...fInput, width: 62, flexShrink: 0, fontSize: 13, fontWeight: 700, padding: "9px 8px" }} />
+                      <button className="kg-ich-btn" onClick={() => removeIng(i)} aria-label={`Verwijder ${row.name || `ingrediënt ${i + 1}`}`}
+                        style={{ flexShrink: 0, width: 32, height: 32, borderRadius: "50%", border: "none", background: "#FFE9EC",
+                          color: AZUKI, fontSize: 15, fontWeight: 800, lineHeight: 1, cursor: "pointer" }}>×</button>
+                    </div>
+                  ))}
+                </div>
+                <button className="kg-ich-btn" onClick={addIng}
+                  style={{ marginTop: 9, alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 7, background: "transparent",
+                    border: `2px dashed ${MATCHA}`, borderRadius: R_PILL, color: MATCHA_DP, fontSize: 13.5, fontWeight: 800,
+                    padding: "8px 16px", cursor: "pointer" }}>
+                  ＋ Ingrediënt toevoegen
+                </button>
+              </div>
+
+              {/* stappen */}
+              <div>
+                <div style={{ fontFamily: F_DISPLAY, fontSize: 14, fontWeight: 800, color: MATCHA_DP, marginBottom: 4 }}>🔥 Stappen</div>
+                <div style={{ fontSize: 12, color: INK_SOFT, fontWeight: 700, marginBottom: 9 }}>
+                  Roze = handen bezig (actief), blauw = wachten (passief). Minuten sturen de tijdlijn.
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+                  {form.steps.map((row, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, background: RICE,
+                      borderRadius: R_MD, padding: "10px 11px" }}>
+                      <span style={{ flex: "0 0 auto", width: 24, height: 24, borderRadius: "50%", background: MATCHA,
+                        color: "#fff", fontWeight: 800, fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center", marginTop: 2 }}>{i + 1}</span>
+                      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+                        <textarea value={row.text} onChange={e => setStep(i, "text", e.target.value)} placeholder="Wat gebeurt er in deze stap?"
+                          aria-label={`Stap ${i + 1} tekst`} rows={2}
+                          style={{ ...fInput, background: "#fff", resize: "vertical", lineHeight: 1.45 }} />
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <input value={row.minutes} onChange={e => setStep(i, "minutes", e.target.value)} placeholder="min" inputMode="numeric"
+                            aria-label={`Stap ${i + 1} minuten`}
+                            style={{ ...fInput, background: "#fff", width: 62, flexShrink: 0, textAlign: "center", fontWeight: 800, fontVariantNumeric: "tabular-nums" }} />
+                          <button className="kg-ich-btn" onClick={() => toggleStepMode(i)}
+                            aria-label={`Stap ${i + 1} is ${row.mode === "passive" ? "wachten" : "actief"} — wissel`}
+                            style={{ border: "none", borderRadius: R_PILL, fontSize: 12, fontWeight: 800, padding: "7px 13px", cursor: "pointer",
+                              background: row.mode === "passive" ? "#E4F3F5" : "#FFE3EA", color: row.mode === "passive" ? RAMUNE_DP : SAKURA_DP }}>
+                            {row.mode === "passive" ? "🕒 wachten" : "✋ actief"}
+                          </button>
+                          <div style={{ marginLeft: "auto", display: "flex", gap: 5 }}>
+                            <button className="kg-ich-btn" onClick={() => moveStep(i, -1)} disabled={i === 0}
+                              aria-label={`Stap ${i + 1} omhoog`} style={{ ...miniBtn, opacity: i === 0 ? 0.4 : 1 }}>↑</button>
+                            <button className="kg-ich-btn" onClick={() => moveStep(i, 1)} disabled={i === form.steps.length - 1}
+                              aria-label={`Stap ${i + 1} omlaag`} style={{ ...miniBtn, opacity: i === form.steps.length - 1 ? 0.4 : 1 }}>↓</button>
+                            <button className="kg-ich-btn" onClick={() => removeStep(i)} aria-label={`Verwijder stap ${i + 1}`}
+                              style={{ ...miniBtn, background: "#FFE9EC", color: AZUKI }}>×</button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <button className="kg-ich-btn" onClick={addStep}
+                  style={{ marginTop: 9, alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 7, background: "transparent",
+                    border: `2px dashed ${MATCHA}`, borderRadius: R_PILL, color: MATCHA_DP, fontSize: 13.5, fontWeight: 800,
+                    padding: "8px 16px", cursor: "pointer" }}>
+                  ＋ Stap toevoegen
+                </button>
+              </div>
+
               {editErr && (
                 <div role="alert" style={{ fontSize: 13, fontWeight: 700, color: AZUKI }}>{editErr}</div>
               )}
-              <div style={{ display: "flex", gap: 10, marginTop: 2 }}>
+              <div style={{ display: "flex", gap: 10, marginTop: 2, position: "sticky", bottom: 0,
+                background: CARD, paddingTop: 10, paddingBottom: 2 }}>
                 <button className="kg-ich-btn" onClick={saveEdit} disabled={saving}
                   style={{ background: MATCHA, border: "none", borderRadius: R_PILL, color: "#fff", fontSize: 14, fontWeight: 800,
                     padding: "10px 22px", minHeight: 44, boxShadow: SHADOW_SOFT, cursor: saving ? "wait" : "pointer",
                     opacity: saving ? 0.7 : 1 }}>
-                  {saving ? "Bewaren…" : "Bewaar"}
+                  {saving ? "Bewaren…" : "Bewaar recept"}
                 </button>
                 <button className="kg-ich-btn" onClick={cancelEdit} disabled={saving}
                   style={{ background: "transparent", border: `1px solid ${LINE}`, borderRadius: R_PILL, color: INK_SOFT,

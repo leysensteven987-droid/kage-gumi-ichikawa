@@ -74,6 +74,61 @@ function sanitizeIngredients(input) {
   return out;
 }
 
+// Coerce a client-supplied step list into clean records. Each step becomes
+// {text, minutes, mode}: text trimmed (rows with empty text are dropped), minutes
+// a finite non-negative number or null, mode "active" | "passive" (defaults active).
+const MAX_STEPS = 60;
+const MAX_STEP_TEXT = 1200;
+function sanitizeSteps(input) {
+  if (!Array.isArray(input)) return null;
+  const out = [];
+  for (const s of input.slice(0, MAX_STEPS)) {
+    if (!s || typeof s !== "object") continue;
+    const text = String(s.text ?? "").trim().slice(0, MAX_STEP_TEXT);
+    if (!text) continue; // a step with no text is meaningless — skip it
+    let minutes = s.minutes;
+    if (minutes === "" || minutes == null) minutes = null;
+    else { minutes = Number(minutes); minutes = Number.isFinite(minutes) && minutes >= 0 ? minutes : null; }
+    const mode = s.mode === "passive" ? "passive" : "active";
+    out.push({ text, minutes, mode });
+  }
+  return out;
+}
+
+// A trimmed string, or undefined when the value isn't a string (so the caller can
+// tell "absent / skip" from "set to empty").
+function sanitizeStr(v) { return typeof v === "string" ? v.trim().slice(0, MAX_FIELD) : undefined; }
+// A finite non-negative number, or undefined (blank / bad → skip, never wipe).
+function sanitizeNum(v) {
+  if (v === "" || v == null) return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+// An array of trimmed non-empty tag strings, or undefined when not an array.
+const MAX_TAGS = 40;
+function sanitizeTags(v) {
+  if (!Array.isArray(v)) return undefined;
+  return v.map((t) => String(t ?? "").trim().slice(0, MAX_FIELD)).filter(Boolean).slice(0, MAX_TAGS);
+}
+
+// Build a partial patch from a PUT body: ONLY the editable fields actually present
+// (and valid) end up in the returned object, so a merge never wipes a field the
+// client didn't send.
+function buildRecipePatch(body) {
+  if (!body || typeof body !== "object") return {};
+  const patch = {};
+  for (const k of ["title", "subtitle", "cuisine", "parallelTip"]) {
+    if (k in body) { const s = sanitizeStr(body[k]); if (s !== undefined) patch[k] = s; }
+  }
+  for (const k of ["servings", "totalTime", "prepTime", "activeTime"]) {
+    if (k in body) { const n = sanitizeNum(body[k]); if (n !== undefined) patch[k] = n; }
+  }
+  if ("tags" in body) { const t = sanitizeTags(body.tags); if (t !== undefined) patch.tags = t; }
+  if ("ingredients" in body) { const ing = sanitizeIngredients(body.ingredients); if (ing) patch.ingredients = ing; }
+  if ("steps" in body) { const st = sanitizeSteps(body.steps); if (st) patch.steps = st; }
+  return patch;
+}
+
 const app = express();
 app.use(express.json());
 
@@ -172,6 +227,47 @@ app.put("/api/recipes/:id/ingredients", (req, res) => {
     return res.json({ ok: true, ingredients });
   } catch {
     return res.status(500).json({ error: "failed to save ingredients" });
+  }
+});
+
+// Full recipe edit: a partial patch of the editable fields (title, subtitle,
+// cuisine, servings, totalTime, prepTime, activeTime, tags, parallelTip, steps,
+// ingredients). Only the fields actually present in the body are overwritten —
+// never wipes what the client didn't send. Same copy-on-write as /ingredients:
+// a seed-only recipe first materializes the whole served set into RECIPES_DIR so
+// the rest of the seed doesn't vanish when the loader flips to corpus-only.
+app.put("/api/recipes/:id", (req, res) => {
+  const id = req.params.id;
+  if (!id || /[\\/]/.test(id) || id.includes("..")) return res.status(400).json({ error: "invalid id" });
+  const patch = buildRecipePatch(req.body);
+  if (!Object.keys(patch).length) return res.status(400).json({ error: "no editable fields" });
+
+  const safeId = (rid) => rid && !/[\\/]/.test(rid) && !rid.includes("..");
+  const file = path.join(RECIPES_DIR, `${id}.json`);
+  try {
+    if (existsSync(file)) {
+      const r = JSON.parse(readFileSync(file, "utf8"));
+      const merged = { ...r, ...patch };
+      writeFileSync(file, JSON.stringify(merged, null, 2));
+      return res.json({ ok: true, recipe: merged });
+    }
+    // No corpus file — the recipe lives only in the seed. Materialize the served
+    // set (excludes soft-removed recipes already) so nothing disappears, applying
+    // the patch to the target on the way out.
+    const { recipes } = loadIchikawaRecipes();
+    const target = recipes.find((r) => r.id === id);
+    if (!target) return res.status(404).json({ error: "recipe not found" });
+    const mergedTarget = { ...target, ...patch };
+    mkdirSync(RECIPES_DIR, { recursive: true });
+    for (const r of recipes) {
+      if (!r || !safeId(r.id)) continue;
+      const f = path.join(RECIPES_DIR, `${r.id}.json`);
+      if (existsSync(f)) continue; // don't clobber a real corpus file
+      writeFileSync(f, JSON.stringify(r.id === id ? mergedTarget : r, null, 2));
+    }
+    return res.json({ ok: true, recipe: mergedTarget });
+  } catch {
+    return res.status(500).json({ error: "failed to save recipe" });
   }
 });
 
