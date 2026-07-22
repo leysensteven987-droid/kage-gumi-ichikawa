@@ -354,13 +354,40 @@ function Mascot({ type, size = 68, bob = true, style }) {
         <rect x="21" y="26" width="38" height="10" rx="5" fill="#DFF3E2" />
       </>
     );
+  } else if (type === "panda") {
+    // self-contained: draws its own eyes/nose/mouth, so the shared dot-face is skipped below
+    body = (
+      <>
+        {/* ears */}
+        <circle cx="22" cy="22" r="11" fill="#40353C" />
+        <circle cx="58" cy="22" r="11" fill="#40353C" />
+        <circle cx="22" cy="22" r="5" fill={BLUSH} />
+        <circle cx="58" cy="22" r="5" fill={BLUSH} />
+        {/* face */}
+        <circle cx="40" cy="44" r="30" fill="#fff" stroke={LINE} strokeWidth="1.5" />
+        {/* eye patches */}
+        <ellipse cx="31" cy="42" rx="8.5" ry="11" fill="#40353C" transform="rotate(-18 31 42)" />
+        <ellipse cx="49" cy="42" rx="8.5" ry="11" fill="#40353C" transform="rotate(18 49 42)" />
+        {/* eyes */}
+        <circle cx="32" cy="44" r="3.4" fill="#fff" />
+        <circle cx="48" cy="44" r="3.4" fill="#fff" />
+        <circle cx="32.6" cy="45" r="1.9" fill={INK} />
+        <circle cx="47.4" cy="45" r="1.9" fill={INK} />
+        {/* cheek blush */}
+        <ellipse cx="19" cy="52" rx="5" ry="3" fill={BLUSH} opacity="0.9" />
+        <ellipse cx="61" cy="52" rx="5" ry="3" fill={BLUSH} opacity="0.9" />
+        {/* nose + mouth */}
+        <ellipse cx="40" cy="52" rx="3" ry="2" fill={INK} />
+        <path d="M40 54 v3 M40 57 q-4 3 -7 1 M40 57 q4 3 7 1" stroke={INK} strokeWidth="1.6" strokeLinecap="round" fill="none" />
+      </>
+    );
   }
   return (
     <svg viewBox="0 0 80 80" width={size} height={size} aria-hidden="true"
       className={bob ? "kg-ich-bob" : undefined}
       style={{ filter: "drop-shadow(0 4px 6px rgba(206,150,116,.25))", ...style }}>
       {body}
-      {face}
+      {type === "panda" ? null : face}
     </svg>
   );
 }
@@ -1616,7 +1643,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
           <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.14em", color: INK_SOFT, whiteSpace: "nowrap" }}>
             WEEK {weekNr}
           </span>
-          <Mascot type="cat" size={38} />
+          <Mascot type="panda" size={38} />
           {onExit && (
             <button className="kg-ich-btn" onClick={onExit} aria-label="terug naar Kage-gumi" title="Terug naar Kage-gumi"
               style={{ width: 38, height: 38, borderRadius: "50%", background: "#fff", border: "none",

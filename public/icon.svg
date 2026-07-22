@@ -1,17 +1,58 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Ichikawa">
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Ichikawa — panda with ramen">
   <!-- rounded-square sakura ground -->
   <rect x="16" y="16" width="480" height="480" rx="112" fill="#FF9DB2"/>
   <!-- soft inner glow -->
   <rect x="16" y="16" width="480" height="480" rx="112" fill="#FFB6C6" opacity="0.35"/>
-  <!-- white onigiri (rice ball) -->
-  <path d="M256 132c22 0 40 14 54 40l70 132c14 26 6 52-24 60-30 8-66 12-100 12s-70-4-100-12c-30-8-38-34-24-60l70-132c14-26 32-40 54-40z" fill="#FFFFFF"/>
-  <!-- nori band -->
-  <rect x="196" y="316" width="120" height="64" rx="14" fill="#5B4750"/>
-  <!-- kawaii face -->
-  <circle cx="222" cy="252" r="13" fill="#5B4750"/>
-  <circle cx="290" cy="252" r="13" fill="#5B4750"/>
-  <path d="M240 282q16 16 32 0" stroke="#5B4750" stroke-width="9" stroke-linecap="round" fill="none"/>
+
+  <!-- steam rising behind the panda -->
+  <g stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" fill="none" opacity="0.45">
+    <path d="M150 300 q-14 -22 0 -44 q14 -22 0 -44"/>
+    <path d="M362 300 q14 -22 0 -44 q-14 -22 0 -44"/>
+  </g>
+
+  <!-- ── panda head ── -->
+  <!-- ears -->
+  <circle cx="182" cy="118" r="38" fill="#40353C"/>
+  <circle cx="330" cy="118" r="38" fill="#40353C"/>
+  <circle cx="182" cy="118" r="18" fill="#FFB6C6"/>
+  <circle cx="330" cy="118" r="18" fill="#FFB6C6"/>
+  <!-- face -->
+  <circle cx="256" cy="190" r="112" fill="#FFFFFF"/>
   <!-- cheek blush -->
-  <circle cx="200" cy="272" r="10" fill="#FF9DB2" opacity="0.55"/>
-  <circle cx="312" cy="272" r="10" fill="#FF9DB2" opacity="0.55"/>
+  <circle cx="180" cy="222" r="15" fill="#FFB6C6" opacity="0.8"/>
+  <circle cx="332" cy="222" r="15" fill="#FFB6C6" opacity="0.8"/>
+  <!-- eye patches -->
+  <ellipse cx="210" cy="184" rx="33" ry="41" fill="#40353C" transform="rotate(-18 210 184)"/>
+  <ellipse cx="302" cy="184" rx="33" ry="41" fill="#40353C" transform="rotate(18 302 184)"/>
+  <!-- eyes -->
+  <circle cx="214" cy="192" r="13" fill="#FFFFFF"/>
+  <circle cx="298" cy="192" r="13" fill="#FFFFFF"/>
+  <circle cx="216" cy="194" r="7" fill="#2C2530"/>
+  <circle cx="296" cy="194" r="7" fill="#2C2530"/>
+  <circle cx="212" cy="189" r="3" fill="#FFFFFF"/>
+  <circle cx="294" cy="189" r="3" fill="#FFFFFF"/>
+  <!-- nose + mouth -->
+  <ellipse cx="256" cy="226" rx="13" ry="9" fill="#2C2530"/>
+  <path d="M256 235 v9 M256 244 q-11 9 -21 4 M256 244 q11 9 21 4" stroke="#2C2530" stroke-width="4" stroke-linecap="round" fill="none"/>
+
+  <!-- ── bowl of ramen (in front) ── -->
+  <!-- bowl body -->
+  <path d="M104 342 C104 430 168 482 256 482 C344 482 408 430 408 342 Z" fill="#4B3B42"/>
+  <!-- foot -->
+  <ellipse cx="256" cy="476" rx="46" ry="10" fill="#3A2E34"/>
+  <!-- broth -->
+  <ellipse cx="256" cy="342" rx="152" ry="30" fill="#F0C27B"/>
+  <ellipse cx="256" cy="344" rx="134" ry="23" fill="#E6B36A"/>
+  <!-- noodles -->
+  <g stroke="#FFF6E5" stroke-width="8" stroke-linecap="round" fill="none">
+    <path d="M178 338 q22 -16 44 0 t44 0 t44 0"/>
+    <path d="M186 350 q22 14 44 0 t44 0 t40 0"/>
+  </g>
+  <!-- nori sheet -->
+  <rect x="196" y="304" width="42" height="54" rx="6" fill="#2C2530" transform="rotate(-8 217 331)"/>
+  <!-- naruto fish-cake swirl -->
+  <circle cx="316" cy="338" r="20" fill="#FFFFFF" stroke="#FF9DB2" stroke-width="4"/>
+  <path d="M316 338 m0 -12 a12 12 0 1 1 -10 6" stroke="#FF9DB2" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <!-- rim highlight -->
+  <path d="M116 348 a150 28 0 0 0 280 0" stroke="#FFFFFF" stroke-width="5" opacity="0.25" fill="none" stroke-linecap="round"/>
 </svg>
