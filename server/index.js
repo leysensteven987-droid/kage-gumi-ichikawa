@@ -12,7 +12,7 @@
 // missing seed degrades to an empty list.
 
 import express from "express";
-import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { processUrl } from "../engine/enrich-recipes.mjs";
@@ -21,6 +21,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 const DATA_DIR = path.join(REPO_ROOT, "data");
 const RECIPES_DIR = path.join(DATA_DIR, "recipes");
+// Photo inbox: a phone snapshot of a cookbook page / recipe card parks here as
+// <id>.<ext> + a <id>.json sidecar until a Claude Code session turns it into a
+// real recipe under data/recipes/. Deliberately DUMB storage — the server never
+// calls an AI/LLM, so there's no API key and no per-photo cost. Gitignored:
+// these are personal photos.
+const PHOTO_DIR = path.join(DATA_DIR, "photo-inbox");
 const SEED_FILE = path.join(DATA_DIR, "recipes.sample.json");
 const DIST_DIR = path.join(REPO_ROOT, "dist");
 
@@ -129,8 +135,57 @@ function buildRecipePatch(body) {
   return patch;
 }
 
+// ─── Photo inbox helpers ────────────────────────────────────────────────────
+// Only real camera-roll image types are accepted; the extension is DERIVED from
+// the allow-listed mime, never from anything the client names, so a payload can
+// never choose its own file extension.
+const PHOTO_MIME_EXT = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/heic": "heic",
+  "image/heif": "heif",
+};
+const MAX_PHOTO_BYTES = 15 * 1024 * 1024; // ~15 MB decoded — a phone photo, not a scan dump
+const MAX_NOTE = 200;
+
+// A short, single-line note ("kookboek p. 42"). Control characters stripped so a
+// pasted note can't smuggle newlines/escapes into the sidecar.
+function sanitizeNote(v) {
+  if (typeof v !== "string") return "";
+  return v.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, MAX_NOTE);
+}
+
+// Sortable + filesystem-safe: millis prefix keeps newest-first trivial, the
+// random suffix defuses same-millisecond collisions. No `/`, `\` or `..` by
+// construction (both halves are [0-9a-z] plus the single separating dash).
+function newPhotoId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// Read every sidecar in the inbox, newest first. A missing dir is not an error —
+// it just means nothing has been photographed yet.
+function readPhotoInbox() {
+  const items = [];
+  try {
+    for (const e of readdirSync(PHOTO_DIR, { withFileTypes: true })) {
+      if (!e.isFile() || !e.name.toLowerCase().endsWith(".json")) continue;
+      try {
+        const it = JSON.parse(readFileSync(path.join(PHOTO_DIR, e.name), "utf8"));
+        if (it && it.id && it.file) items.push(it);
+      } catch {}
+    }
+  } catch {}
+  return items.sort((a, b) => String(b.addedDate || "").localeCompare(String(a.addedDate || "")));
+}
+
 const app = express();
-app.use(express.json());
+// Every route keeps the SMALL default body limit (~100kb) — except the photo
+// upload, which brings its own 25mb parser. The global parser has to step aside
+// for that one path, or it would 413 a phone photo before the route ever runs.
+const PHOTO_UPLOAD_PATH = "/api/recipes/photo";
+const jsonSmall = express.json();
+app.use((req, res, next) => (req.path === PHOTO_UPLOAD_PATH ? next() : jsonSmall(req, res, next)));
 
 app.get("/api/recipes", (_req, res) => {
   const { recipes, source } = loadIchikawaRecipes();
@@ -268,6 +323,112 @@ app.put("/api/recipes/:id", (req, res) => {
     return res.json({ ok: true, recipe: mergedTarget });
   } catch {
     return res.status(500).json({ error: "failed to save recipe" });
+  }
+});
+
+// ─── Photo inbox ─────────────────────────────────────────────────────────────
+// Snap a cookbook page / recipe card on the phone; it is STORED, nothing more.
+// No AI call happens here (no key, no cost) — a Claude Code session reads the
+// pending photos later and writes real recipes into data/recipes/.
+//
+// The 25 MB body parser is mounted on THIS ROUTE ONLY; the global express.json()
+// keeps its small default limit so a normal API route can't be flooded.
+app.post(PHOTO_UPLOAD_PATH, express.json({ limit: "25mb" }), (req, res) => {
+  const dataUrl = typeof req.body?.dataUrl === "string" ? req.body.dataUrl : "";
+  const m = /^data:([a-z0-9.+/-]+);base64,(.*)$/is.exec(dataUrl.trim());
+  if (!m) return res.status(400).json({ error: "geen geldige foto ontvangen" });
+  const mime = m[1].toLowerCase();
+  const ext = PHOTO_MIME_EXT[mime];
+  if (!ext) return res.status(400).json({ error: "dat bestandstype kan ik niet bewaren — gebruik een foto (JPG, PNG, WEBP of HEIC)" });
+
+  let buf;
+  try {
+    buf = Buffer.from(m[2], "base64");
+  } catch {
+    return res.status(400).json({ error: "geen geldige foto ontvangen" });
+  }
+  if (!buf.length) return res.status(400).json({ error: "geen geldige foto ontvangen" });
+  if (buf.length > MAX_PHOTO_BYTES) {
+    return res.status(413).json({ error: "die foto is te groot (max 15 MB) — maak 'm wat kleiner" });
+  }
+
+  try {
+    const id = newPhotoId();
+    const item = {
+      id,
+      file: `${id}.${ext}`,
+      mime,
+      note: sanitizeNote(req.body?.note),
+      addedDate: new Date().toISOString(),
+      status: "pending",
+    };
+    mkdirSync(PHOTO_DIR, { recursive: true });
+    writeFileSync(path.join(PHOTO_DIR, item.file), buf);
+    writeFileSync(path.join(PHOTO_DIR, `${id}.json`), JSON.stringify(item, null, 2));
+    return res.json({ ok: true, item });
+  } catch (err) {
+    console.error("[ichikawa] photo save failed:", err?.message || err);
+    return res.status(500).json({ error: "de foto kon niet bewaard worden" });
+  }
+});
+
+// A body that blows past the 25mb parser limit never reaches the handler above, so
+// it would fall through to Express' raw HTML error page. Catch that one case and
+// answer with the same friendly Dutch line the handler's own size check uses.
+app.use((err, req, res, next) => {
+  if (req.path === PHOTO_UPLOAD_PATH && (err?.type === "entity.too.large" || err?.status === 413)) {
+    return res.status(413).json({ error: "die foto is te groot (max 15 MB) — maak 'm wat kleiner" });
+  }
+  return next(err);
+});
+
+// The still-to-process queue — newest first. A missing dir just means an empty inbox.
+app.get("/api/recipes/photo-inbox", (_req, res) => {
+  try {
+    return res.json({ items: readPhotoInbox().filter((it) => it.status === "pending") });
+  } catch {
+    return res.status(500).json({ error: "failed to read photo inbox" });
+  }
+});
+
+// The image bytes themselves (thumbnails in the UI). The real filename comes from
+// the sidecar, never from the URL, so the id alone can't reach another file.
+app.get("/api/recipes/photo/:id/image", (req, res) => {
+  const id = req.params.id;
+  if (!id || /[\\/]/.test(id) || id.includes("..")) return res.status(400).json({ error: "invalid id" });
+  const sidecar = path.join(PHOTO_DIR, `${id}.json`);
+  if (!existsSync(sidecar)) return res.status(404).json({ error: "photo not found" });
+  try {
+    const item = JSON.parse(readFileSync(sidecar, "utf8"));
+    const name = String(item?.file || "");
+    if (!name || /[\\/]/.test(name) || name.includes("..")) return res.status(404).json({ error: "photo not found" });
+    const file = path.join(PHOTO_DIR, name);
+    if (!existsSync(file)) return res.status(404).json({ error: "photo not found" });
+    res.type(item.mime || "application/octet-stream");
+    return res.sendFile(file);
+  } catch {
+    return res.status(500).json({ error: "failed to read photo" });
+  }
+});
+
+// Drop a photo from the inbox — image + sidecar both go. A real delete (not a soft
+// keep:false like recipes): an unwanted snapshot has nothing worth keeping.
+app.delete("/api/recipes/photo/:id", (req, res) => {
+  const id = req.params.id;
+  if (!id || /[\\/]/.test(id) || id.includes("..")) return res.status(400).json({ error: "invalid id" });
+  const sidecar = path.join(PHOTO_DIR, `${id}.json`);
+  if (!existsSync(sidecar)) return res.status(404).json({ error: "photo not found" });
+  try {
+    let name = "";
+    try { name = String(JSON.parse(readFileSync(sidecar, "utf8"))?.file || ""); } catch {}
+    if (name && !/[\\/]/.test(name) && !name.includes("..")) {
+      const file = path.join(PHOTO_DIR, name);
+      if (existsSync(file)) unlinkSync(file);
+    }
+    unlinkSync(sidecar);
+    return res.json({ ok: true });
+  } catch {
+    return res.status(500).json({ error: "failed to delete photo" });
   }
 });
 

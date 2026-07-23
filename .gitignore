@@ -2,6 +2,7 @@ node_modules
 dist
 data/recipes/*
 !data/recipes/.gitkeep
+data/photo-inbox/
 data/.hf-session.json
 data/.hf-creds.json
 data/.hf-browser-profile/

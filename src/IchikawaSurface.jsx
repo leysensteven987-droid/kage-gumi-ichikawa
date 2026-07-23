@@ -1,9 +1,9 @@
 /**
+ * @vibe-author STLE @version 9 @date 23JUL26 @comment Foto-inbox — recept fotograferen en bewaren; Ichikawa zet hem later om in een recept
  * @vibe-author STLE @version 8 @date 23JUL26 @comment Tijden volgen nu automatisch de stappen; handmatig ingevulde tijden blijven behouden
  * @vibe-author STLE @version 7 @date 23JUL26 @comment Herbereken-knop in de editor — totale + actieve tijd opnieuw berekend uit de stappen
  * @vibe-author STLE @version 6 @date 22JUL26 @comment Recepten krijgt een eigen tab (皿) op mobiel; recept-editor uitgebreid van alleen ingredienten naar volledig (titel/ondertitel/keuken/tags/porties/tijden/parallel-tip/stappen/ingredienten) via PUT /api/recipes/:id
  * @vibe-author STLE @version 5 @date 21JUL26 @comment Weekrandomizer — "Verras me" vult de hele week (MA–ZO) met 6 willekeurige recepten; het gerecht van dinsdag draait door naar woensdag (1× koken, 2× eten). Weekplan opent van 5 werkdagen naar een volledige 7-daagse week.
- * @vibe-author STLE @version 4 @date 21JUL26 @comment Desktop "management desk" — ≥1100px (ONE JS breakpoint) lays PLAN | BIBLIOTHEEK | SHOP·KOOK side-by-side from the same render pieces; phone composition below the breakpoint unchanged
  */
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import STORE from "../data/jumbo-gent-store.json";
@@ -507,12 +507,19 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   const [removedIds, setRemovedIds] = useState(() => new Set()); // soft-removed (optimistic)
   const [removeNote, setRemoveNote] = useState(null); // gentle failure toast
   const [heroIdx, setHeroIdx]   = useState(null);  // pinned "vanavond" slot; null = auto
-  // ── Add-a-recipe-from-URL sheet (works phone + desk; shared renderer)
-  const [addOpen, setAddOpen] = useState(false);   // URL sheet open?
+  // ── Add-a-recipe sheet (URL *or* photo; works phone + desk; shared renderer)
+  const [addOpen, setAddOpen] = useState(false);   // add sheet open?
   const [addUrl, setAddUrl]   = useState("");      // the pasted recipe link
-  const [addBusy, setAddBusy] = useState(false);   // request in flight
+  const [addBusy, setAddBusy] = useState(false);   // URL request in flight
   const [addErr, setAddErr]   = useState(null);    // inline error in the sheet
   const [addNote, setAddNote] = useState(null);    // success toast
+  // ── Foto-inbox: photographed recipe pages waiting to be turned into recipes.
+  // Pure storage — nothing here calls an AI; a Claude Code sessie leest de wachtrij
+  // later uit en schrijft er echte recepten van.
+  const [photoInbox, setPhotoInbox] = useState([]); // pending sidecars, newest first
+  const [photoBusy, setPhotoBusy]   = useState(false); // upload in flight
+  const [photoErr, setPhotoErr]     = useState(null);  // inline error in the sheet
+  const [photoOk, setPhotoOk]       = useState(null);  // inline confirmation in the sheet
   const libRef  = useRef(null); // scroll target: empty slot / SHOP empty → bibliotheek
   const mainRef = useRef(null); // the mode scroll pane — reset scroll on mode switch
   const searchRef = useRef(null); // desktop '/': focus the library search
@@ -545,6 +552,15 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
       .finally(() => { if (alive) setLoaded(true); });
     return () => { alive = false; };
   }, []);
+
+  // Refresh the photo inbox (mount, and after every upload / delete). A failure is
+  // silent-by-design: the inbox strip is an extra, never a reason to break the page.
+  const loadPhotoInbox = useCallback(() => {
+    return API_GET("/api/recipes/photo-inbox")
+      .then(d => setPhotoInbox(Array.isArray(d.items) ? d.items : []))
+      .catch(() => setPhotoInbox([]));
+  }, []);
+  useEffect(() => { loadPhotoInbox(); }, [loadPhotoInbox]);
 
   // Each mode is its own page — start it at the top.
   useEffect(() => { if (mainRef.current) mainRef.current.scrollTop = 0; }, [mode]);
@@ -747,6 +763,51 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     } finally {
       setAddBusy(false);
     }
+  }
+
+  // Photograph a cookbook page → the server just STORES it (no AI call, no key,
+  // no cost). The photo lands in the foto-inbox and Ichikawa turns it into a real
+  // recipe later. Returns true on success so the sheet can clear its own fields.
+  async function handleAddPhoto(file, note) {
+    if (!file || photoBusy) return false;
+    setPhotoBusy(true);
+    setPhotoErr(null);
+    setPhotoOk(null);
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(String(fr.result || ""));
+        fr.onerror = () => reject(new Error("de foto kon niet gelezen worden"));
+        fr.readAsDataURL(file);
+      });
+      const res = await fetch("/api/recipes/photo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataUrl, note: note || "" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.error || "de foto kon niet bewaard worden");
+      await loadPhotoInbox();
+      setPhotoOk("Foto opgeslagen — Ichikawa verwerkt hem later. 📷");
+      return true;
+    } catch (err) {
+      setPhotoErr(err.message || "de foto kon niet bewaard worden");
+      return false;
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
+  // Drop a photo from the inbox (image + sidecar), then re-read the queue.
+  async function handleDeletePhoto(id) {
+    try {
+      const res = await fetch(`/api/recipes/photo/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(String(res.status));
+    } catch {
+      setRemoveNote("Foto verwijderen lukte niet 😖");
+      setTimeout(() => setRemoveNote(null), 3000);
+    }
+    await loadPhotoInbox();
   }
 
   // ── Aggregated shopping list ──────────────────────────────────────────────
@@ -1058,14 +1119,53 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
             Kies tot {MAX_DINNERS} diners voor je week (hetzelfde gerecht mag meerdere dagen). 🍱
           </p>
 
-          {/* add a recipe straight from a link — opens the URL sheet */}
-          <button className="kg-ich-btn" onClick={() => { setAddErr(null); setAddOpen(true); }}
+          {/* add a recipe — link of foto; opens the shared add sheet */}
+          <button className="kg-ich-btn" onClick={() => { setAddErr(null); setPhotoErr(null); setPhotoOk(null); setAddOpen(true); }}
             style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%",
               minHeight: 48, marginBottom: 12, background: "#fff", border: `2px dashed ${MATCHA}`,
               borderRadius: R_LG, color: MATCHA_DP, fontFamily: F_DISPLAY, fontSize: 14.5, fontWeight: 800,
               boxShadow: SHADOW_SOFT }}>
-            <span style={{ fontSize: 17, lineHeight: 1 }}>＋</span> Recept via URL
+            <span style={{ fontSize: 17, lineHeight: 1 }}>＋</span> Recept toevoegen · 🔗 of 📷
           </button>
+
+          {/* ── foto-inbox: gefotografeerde receptpagina's die nog wachten ──
+              Bewust één klein kaartje, geen eigen modus: het is een wachtrij, geen
+              werkplek. Ichikawa (een Claude Code sessie) zet ze later om. */}
+          {photoInbox.length > 0 && (
+            <div className="kg-ich-card" style={{ background: CARD, borderRadius: R_LG, padding: "12px 12px 10px",
+              marginBottom: 12, boxShadow: SHADOW_SOFT, border: `2px dashed ${BLUSH}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                <span aria-hidden="true" style={{ fontSize: 16, lineHeight: 1 }}>📷</span>
+                <span style={{ fontFamily: F_DISPLAY, fontSize: 14, fontWeight: 800, color: INK }}>
+                  {photoInbox.length} foto{photoInbox.length === 1 ? "" : "'s"} wacht{photoInbox.length === 1 ? "" : "en"} op verwerking
+                </span>
+              </div>
+              <div className="kg-ich-chiprow" role="list" aria-label="foto's in de wachtrij"
+                style={{ alignItems: "flex-start" }}>
+                {photoInbox.map(p => (
+                  <div key={p.id} role="listitem" style={{ position: "relative", width: 84, flexShrink: 0 }}>
+                    <div style={{ position: "relative", width: 84, height: 84, borderRadius: R_MD, overflow: "hidden",
+                      background: `linear-gradient(150deg, ${RICE2}, ${BLUSH})`, boxShadow: SHADOW_SOFT }}>
+                      <img src={`/api/recipes/photo/${encodeURIComponent(p.id)}/image`} alt={p.note || "gefotografeerd recept"}
+                        loading="lazy" onError={e => { e.currentTarget.style.display = "none"; }}
+                        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+                      <button className="kg-ich-btn" onClick={() => handleDeletePhoto(p.id)}
+                        aria-label={`foto verwijderen${p.note ? ` (${p.note})` : ""}`}
+                        style={{ position: "absolute", top: 4, right: 4, width: 24, height: 24, borderRadius: "50%",
+                          border: "none", background: "rgba(255,255,255,.9)", color: AZUKI, fontSize: 12,
+                          fontWeight: 800, lineHeight: 1, padding: 0 }}>✕</button>
+                    </div>
+                    {p.note && (
+                      <div title={p.note} style={{ fontSize: 10.5, fontWeight: 700, color: INK_SOFT, marginTop: 4,
+                        lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {p.note}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* keyword search */}
           <div style={{ position: "relative", marginBottom: 12 }}>
@@ -1749,9 +1849,11 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
         </div>
       )}
 
-      {/* ── add-a-recipe-from-URL sheet ── */}
-      {addOpen && <AddUrlSheet url={addUrl} setUrl={setAddUrl} busy={addBusy} err={addErr}
-        onSubmit={handleAddFromUrl} onClose={() => { if (!addBusy) { setAddOpen(false); setAddErr(null); } }} />}
+      {/* ── add-a-recipe sheet — link of foto ── */}
+      {addOpen && <AddRecipeSheet url={addUrl} setUrl={setAddUrl} busy={addBusy} err={addErr}
+        onSubmit={handleAddFromUrl}
+        photoBusy={photoBusy} photoErr={photoErr} photoOk={photoOk} onSubmitPhoto={handleAddPhoto}
+        onClose={() => { if (!addBusy && !photoBusy) { setAddOpen(false); setAddErr(null); setPhotoErr(null); setPhotoOk(null); } }} />}
 
       {/* ── recipe card sheet ── */}
       {detail && <RecipeSheet recipe={detail} servings={servings} count={countOf(detail.id)}
@@ -2251,12 +2353,20 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
   );
 }
 
-// ─── Add-a-recipe-from-URL sheet ─────────────────────────────────────────────
+// ─── Add-a-recipe sheet — two ways in: a link, or a photo ────────────────────
 // Same bottom-sheet / centered-modal shell as the others (position:absolute so it
-// works in both mounts). Paste a public recipe link → the server pulls its
-// schema.org JSON-LD into the corpus and hands the normalized recipe back.
-function AddUrlSheet({ url, setUrl, busy, err, onSubmit, onClose }) {
+// works in both mounts).
+//   🔗 URL   — the server pulls the page's schema.org JSON-LD into the corpus and
+//              hands the normalized recipe back, straight into the library.
+//   📷 FOTO  — a snapshot of a cookbook page is only STORED (foto-inbox). No AI
+//              runs here; Ichikawa turns the queue into recipes later. Nothing
+//              lands in the library yet, so the copy must not promise that.
+function AddRecipeSheet({ url, setUrl, busy, err, onSubmit, onClose,
+                          photoBusy, photoErr, photoOk, onSubmitPhoto }) {
   const inputRef = useRef(null);
+  const fileRef  = useRef(null);
+  const [file, setFile] = useState(null);       // the chosen photo (File)
+  const [pNote, setPNote] = useState("");       // optional "kookboek p. 42"
   useEffect(() => {
     const onKey = e => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -2264,10 +2374,21 @@ function AddUrlSheet({ url, setUrl, busy, err, onSubmit, onClose }) {
   }, [onClose]);
   useEffect(() => { if (inputRef.current) inputRef.current.focus(); }, []);
 
+  // Clear the picker after a stored photo so a second cookbook page can go
+  // straight in — the sheet stays open on purpose (pages come in pairs).
+  async function submitPhoto() {
+    const ok = await onSubmitPhoto(file, pNote);
+    if (ok) {
+      setFile(null);
+      setPNote("");
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
   return (
     <div onClick={onClose} className="kg-ich-overlay" style={{ position: "absolute", inset: 0, zIndex: 86, background: "rgba(75,59,66,.42)",
       display: "flex", alignItems: "flex-end", justifyContent: "center", animation: "ichFade .18s ease" }}>
-      <div onClick={e => e.stopPropagation()} role="dialog" aria-label="Recept via URL toevoegen" className="kg-ich-sheet"
+      <div onClick={e => e.stopPropagation()} role="dialog" aria-label="Recept toevoegen" className="kg-ich-sheet"
         style={{ width: "100%", maxWidth: 520, maxHeight: "92%", background: CARD,
           borderRadius: `${R_LG}px ${R_LG}px 0 0`, overflow: "hidden", display: "flex", flexDirection: "column",
           animation: "ichSheet .22s ease", boxShadow: "0 -18px 60px rgba(150,110,80,.38)", fontFamily: F_ROUND, color: INK }}>
@@ -2278,16 +2399,18 @@ function AddUrlSheet({ url, setUrl, busy, err, onSubmit, onClose }) {
             style={{ position: "absolute", top: 14, right: 14, width: 36, height: 36, borderRadius: "50%",
               background: "rgba(255,255,255,.85)", border: "none", color: INK, fontSize: 16, lineHeight: 1, fontWeight: 800 }}>✕</button>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 30, filter: "drop-shadow(0 4px 8px rgba(60,110,80,.3))" }}>🔗</span>
+            <span style={{ fontSize: 30, filter: "drop-shadow(0 4px 8px rgba(60,110,80,.3))" }}>🍱</span>
             <div>
-              <h2 style={{ fontFamily: F_DISPLAY, fontSize: 18, fontWeight: 800, margin: 0, lineHeight: 1.2 }}>Recept via URL</h2>
-              <div style={{ fontSize: 12.5, opacity: .95, marginTop: 2, fontWeight: 600 }}>Plak een receptlink — ik haal 'm binnen 🍱</div>
+              <h2 style={{ fontFamily: F_DISPLAY, fontSize: 18, fontWeight: 800, margin: 0, lineHeight: 1.2 }}>Recept toevoegen</h2>
+              <div style={{ fontSize: 12.5, opacity: .95, marginTop: 2, fontWeight: 600 }}>Plak een link — of fotografeer een receptpagina 📷</div>
             </div>
           </div>
         </div>
 
-        {/* body — the URL field + submit */}
-        <form onSubmit={onSubmit} style={{ padding: "18px 20px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+        {/* body — scrolls, because it now carries two ways in (link + foto) */}
+        <div style={{ overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+        {/* ① het linkveld + versturen */}
+        <form onSubmit={onSubmit} style={{ padding: "18px 20px 4px", display: "flex", flexDirection: "column", gap: 14 }}>
           <input ref={inputRef} type="url" inputMode="url" autoComplete="off" autoCapitalize="off" spellCheck={false}
             className="kg-ich-search-input" value={url} onChange={e => setUrl(e.target.value)}
             placeholder="https://… (recept van eender welke site)" disabled={busy}
@@ -2316,6 +2439,69 @@ function AddUrlSheet({ url, setUrl, busy, err, onSubmit, onClose }) {
             </button>
           </div>
         </form>
+
+        {/* ── "of" — de scheiding tussen de twee manieren ── */}
+        <div aria-hidden="true" style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 20px 4px" }}>
+          <span style={{ flex: 1, height: 2, background: LINE, borderRadius: 2 }} />
+          <span style={{ fontSize: 12.5, fontWeight: 800, color: INK_SOFT, letterSpacing: ".06em" }}>of</span>
+          <span style={{ flex: 1, height: 2, background: LINE, borderRadius: 2 }} />
+        </div>
+
+        {/* ② de fotoweg — bewaren, niet omzetten (dat doet Ichikawa later) */}
+        <section aria-label="Foto van een recept" style={{ padding: "12px 20px 22px", display: "flex", flexDirection: "column", gap: 12 }}>
+          <h3 style={{ fontFamily: F_DISPLAY, fontSize: 15.5, fontWeight: 800, margin: 0, color: INK }}>
+            📷 Foto van een recept
+          </h3>
+
+          {/* kiezen/maken — verborgen input onder de gestippelde pil (capture opent de camera) */}
+          <label className="kg-ich-btn"
+            style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%",
+              minHeight: 48, background: "#fff", border: `2px dashed ${SAKURA}`, borderRadius: R_LG,
+              color: file ? INK : SAKURA_DP, fontFamily: F_DISPLAY, fontSize: 14, fontWeight: 800,
+              padding: "11px 16px", textAlign: "center", boxShadow: SHADOW_SOFT,
+              cursor: photoBusy ? "not-allowed" : "pointer", opacity: photoBusy ? .6 : 1 }}>
+            <span aria-hidden="true" style={{ fontSize: 17, lineHeight: 1 }}>{file ? "🖼" : "📷"}</span>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {file ? file.name : "Maak of kies een foto"}
+            </span>
+            <input ref={fileRef} type="file" accept="image/*" capture="environment" disabled={photoBusy}
+              onChange={e => { setFile(e.target.files && e.target.files[0] ? e.target.files[0] : null); }}
+              style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }} />
+          </label>
+
+          <input type="text" className="kg-ich-search-input" value={pNote} disabled={photoBusy}
+            onChange={e => setPNote(e.target.value)} maxLength={200}
+            placeholder="Notitie (optioneel) — bv. kookboek p. 42"
+            style={{ padding: "12px 16px" }} />
+
+          {photoErr && (
+            <div role="alert" style={{ background: "#FFECEF", color: AZUKI, fontSize: 13, fontWeight: 700,
+              borderRadius: R_MD, padding: "10px 13px", lineHeight: 1.5 }}>
+              😖 {photoErr}
+            </div>
+          )}
+          {photoOk && (
+            <div role="status" style={{ background: "#EAF7EE", color: MATCHA_DP, fontSize: 13, fontWeight: 700,
+              borderRadius: R_MD, padding: "10px 13px", lineHeight: 1.5 }}>
+              {photoOk}
+            </div>
+          )}
+
+          <p style={{ fontSize: 12.5, color: G_MUTED, margin: 0, lineHeight: 1.6 }}>
+            De foto wordt alleen bewaard. Ichikawa leest de wachtrij later uit en maakt er een echt recept van 🍙
+          </p>
+
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button type="button" className="kg-ich-btn" onClick={submitPhoto} disabled={photoBusy || !file}
+              style={{ background: photoBusy || !file ? "#FFD9E1" : SAKURA_DP, border: "none", borderRadius: R_PILL,
+                color: "#fff", fontSize: 14.5, fontWeight: 800, minHeight: 48, padding: "11px 22px",
+                boxShadow: photoBusy || !file ? "none" : SHADOW_SOFT,
+                cursor: photoBusy || !file ? "not-allowed" : "pointer" }}>
+              {photoBusy ? "Bewaren…" : "Foto bewaren 📷"}
+            </button>
+          </div>
+        </section>
+        </div>
       </div>
     </div>
   );
