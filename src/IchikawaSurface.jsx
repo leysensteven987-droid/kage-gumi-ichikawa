@@ -1,9 +1,9 @@
 /**
+ * @vibe-author STLE @version 8 @date 23JUL26 @comment Tijden volgen nu automatisch de stappen; handmatig ingevulde tijden blijven behouden
  * @vibe-author STLE @version 7 @date 23JUL26 @comment Herbereken-knop in de editor — totale + actieve tijd opnieuw berekend uit de stappen
  * @vibe-author STLE @version 6 @date 22JUL26 @comment Recepten krijgt een eigen tab (皿) op mobiel; recept-editor uitgebreid van alleen ingredienten naar volledig (titel/ondertitel/keuken/tags/porties/tijden/parallel-tip/stappen/ingredienten) via PUT /api/recipes/:id
  * @vibe-author STLE @version 5 @date 21JUL26 @comment Weekrandomizer — "Verras me" vult de hele week (MA–ZO) met 6 willekeurige recepten; het gerecht van dinsdag draait door naar woensdag (1× koken, 2× eten). Weekplan opent van 5 werkdagen naar een volledige 7-daagse week.
  * @vibe-author STLE @version 4 @date 21JUL26 @comment Desktop "management desk" — ≥1100px (ONE JS breakpoint) lays PLAN | BIBLIOTHEEK | SHOP·KOOK side-by-side from the same render pieces; phone composition below the breakpoint unchanged
- * @vibe-author STLE @version 3 @date 21JUL26 @comment Port "De dagronde" into the standalone PWA — rewired onto /api/recipes + self-hosted /fonts + root data/ store JSON
  */
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import STORE from "../data/jumbo-gent-store.json";
@@ -1766,6 +1766,28 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   );
 }
 
+// Pure: the totals implied by the step rows. total = every step's minutes,
+// active = only the hands-on (✋ actief) ones. Blank minutes count as 0.
+const computeTimes = steps => {
+  const mins = steps.map(s => {
+    const n = s.minutes === "" ? 0 : Number(s.minutes);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  });
+  return {
+    total:  mins.reduce((a, n) => a + n, 0),
+    active: steps.reduce((a, s, i) => a + (s.mode === "passive" ? 0 : mins[i]), 0),
+  };
+};
+
+// Re-derive the tijden after a step change — unless the user hand-edited them.
+// Wraps the RETURNED form of every step-mutating helper, so editing a step keeps
+// the totals in sync; `timesManual` (set by typing in a tijd field) freezes them.
+const withTimes = f => {
+  if (f.timesManual) return f;
+  const { total, active } = computeTimes(f.steps);
+  return { ...f, totalTime: String(total), activeTime: String(active) };
+};
+
 // ─── Recipe card sheet — bottom sheet with the full cooking-mode detail ──────
 // position:absolute child of the root (NOT fixed) so it works identically in
 // the desktop takeover and inside MobileShell's visualViewport-sized area.
@@ -1808,37 +1830,39 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
         text: s.text || "", minutes: s.minutes == null ? "" : String(s.minutes),
         mode: s.mode === "passive" ? "passive" : "active",
       })),
+      // false = tijden auto-volgen de stappen. Opening the editor never recomputes
+      // (that would silently rewrite the stored number before a single edit) — only
+      // an actual step mutation does.
+      timesManual: false,
     });
   };
   const cancelEdit = () => { setForm(null); setEditErr(""); };
-  const setField = (k, val) => setForm(f => ({ ...f, [k]: val }));
+  // Typing in either tijd field is a manual override — from then on step edits
+  // leave the tijden alone (until the herbereken-knop puts them back on auto).
+  const setField = (k, val) => setForm(f => (
+    (k === "totalTime" || k === "activeTime")
+      ? { ...f, [k]: val, timesManual: true }
+      : { ...f, [k]: val }
+  ));
   // ingredient rows
   const setIng    = (i, field, val) => setForm(f => ({ ...f, ingredients: f.ingredients.map((row, k) => (k === i ? { ...row, [field]: val } : row)) }));
   const removeIng = i => setForm(f => ({ ...f, ingredients: f.ingredients.filter((_, k) => k !== i) }));
   const addIng    = () => setForm(f => ({ ...f, ingredients: [...f.ingredients, { name: "", qty: "", unit: "" }] }));
-  // step rows
-  const setStep    = (i, field, val) => setForm(f => ({ ...f, steps: f.steps.map((row, k) => (k === i ? { ...row, [field]: val } : row)) }));
-  const removeStep = i => setForm(f => ({ ...f, steps: f.steps.filter((_, k) => k !== i) }));
-  const addStep    = () => setForm(f => ({ ...f, steps: [...f.steps, { text: "", minutes: "", mode: "active" }] }));
-  const toggleStepMode = i => setForm(f => ({ ...f, steps: f.steps.map((row, k) => (k === i ? { ...row, mode: row.mode === "passive" ? "active" : "passive" } : row)) }));
+  // step rows — every mutation runs through withTimes(), so the tijden follow the
+  // stappen live (unless the user hand-edited them, see setField).
+  const setStep    = (i, field, val) => setForm(f => withTimes({ ...f, steps: f.steps.map((row, k) => (k === i ? { ...row, [field]: val } : row)) }));
+  const removeStep = i => setForm(f => withTimes({ ...f, steps: f.steps.filter((_, k) => k !== i) }));
+  const addStep    = () => setForm(f => withTimes({ ...f, steps: [...f.steps, { text: "", minutes: "", mode: "active" }] }));
+  const toggleStepMode = i => setForm(f => withTimes({ ...f, steps: f.steps.map((row, k) => (k === i ? { ...row, mode: row.mode === "passive" ? "active" : "passive" } : row)) }));
   const moveStep = (i, dir) => setForm(f => {
     const j = i + dir;
     if (j < 0 || j >= f.steps.length) return f;
     const s = f.steps.slice(); [s[i], s[j]] = [s[j], s[i]];
-    return { ...f, steps: s };
+    return withTimes({ ...f, steps: s });
   });
-  // Recompute the recipe totals from the step rows — total = the sum of every step's
-  // minutes, active = only the hands-on (✋ actief) ones. Fills the tijden inputs so the
-  // numbers can still be tweaked by hand; nothing persists until Opslaan.
-  const recalcTimes = () => setForm(f => {
-    const mins = f.steps.map(s => {
-      const n = s.minutes === "" ? 0 : Number(s.minutes);
-      return Number.isFinite(n) && n >= 0 ? n : 0;
-    });
-    const total  = mins.reduce((a, n) => a + n, 0);
-    const active = f.steps.reduce((a, s, i) => a + (s.mode === "passive" ? 0 : mins[i]), 0);
-    return { ...f, totalTime: String(total), activeTime: String(active) };
-  });
+  // Force a re-sync: recompute both tijden from the step rows AND drop the manual
+  // override, so the tijden auto-follow the stappen again from here on.
+  const recalcTimes = () => setForm(f => withTimes({ ...f, timesManual: false }));
   const saveEdit = async () => {
     const num = v => {
       if (v === "" || v == null) return undefined;
@@ -2058,10 +2082,11 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
                       style={{ ...fInput, textAlign: "center", fontVariantNumeric: "tabular-nums" }} />
                   </div>
                 </div>
-                {/* herbereken — vult beide tijdvelden opnieuw uit de stappen (blijft handmatig aanpasbaar) */}
+                {/* herbereken — zet de tijden terug op automatisch en vult ze opnieuw uit de stappen */}
                 <div>
                   <button className="kg-ich-btn" onClick={recalcTimes}
-                    aria-label="Herbereken totale en actieve tijd uit de stappen"
+                    title="Herbereken de tijden opnieuw uit de stappen"
+                    aria-label="Herbereken de tijden opnieuw uit de stappen en laat ze weer automatisch volgen"
                     style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "transparent",
                       border: `2px dashed ${MATCHA}`, borderRadius: R_PILL, color: MATCHA_DP, fontSize: 13.5, fontWeight: 800,
                       padding: "8px 16px", cursor: "pointer" }}>
