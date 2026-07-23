@@ -12,9 +12,11 @@
     "capture": "node engine/capture-hellofresh-session.mjs",
     "pull": "node engine/pull-box-history.mjs",
     "enrich": "node engine/enrich-recipes.mjs",
-    "clean": "node engine/backfill-clean.mjs"
+    "clean": "node engine/backfill-clean.mjs",
+    "timing": "node engine/timing-pass.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.113.0",
     "express": "^4.21.2",
     "playwright": "^1.48.2",
     "react": "^18.3.1",
