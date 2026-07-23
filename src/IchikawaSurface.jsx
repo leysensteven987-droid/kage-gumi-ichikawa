@@ -1,9 +1,9 @@
 /**
+ * @vibe-author STLE @version 7 @date 23JUL26 @comment Herbereken-knop in de editor — totale + actieve tijd opnieuw berekend uit de stappen
  * @vibe-author STLE @version 6 @date 22JUL26 @comment Recepten krijgt een eigen tab (皿) op mobiel; recept-editor uitgebreid van alleen ingredienten naar volledig (titel/ondertitel/keuken/tags/porties/tijden/parallel-tip/stappen/ingredienten) via PUT /api/recipes/:id
  * @vibe-author STLE @version 5 @date 21JUL26 @comment Weekrandomizer — "Verras me" vult de hele week (MA–ZO) met 6 willekeurige recepten; het gerecht van dinsdag draait door naar woensdag (1× koken, 2× eten). Weekplan opent van 5 werkdagen naar een volledige 7-daagse week.
  * @vibe-author STLE @version 4 @date 21JUL26 @comment Desktop "management desk" — ≥1100px (ONE JS breakpoint) lays PLAN | BIBLIOTHEEK | SHOP·KOOK side-by-side from the same render pieces; phone composition below the breakpoint unchanged
  * @vibe-author STLE @version 3 @date 21JUL26 @comment Port "De dagronde" into the standalone PWA — rewired onto /api/recipes + self-hosted /fonts + root data/ store JSON
- * @vibe-author STLE @version 2 @date 21JUL26 @comment Redesign — "De dagronde": three-mode companion (献 Plan / 買 Shop / 火 Kook), paw-trail winkelronde, persisted weekplan + checklist, bottom-sheet recipe cards, dual-theme ground
  */
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import STORE from "../data/jumbo-gent-store.json";
@@ -1827,6 +1827,18 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
     const s = f.steps.slice(); [s[i], s[j]] = [s[j], s[i]];
     return { ...f, steps: s };
   });
+  // Recompute the recipe totals from the step rows — total = the sum of every step's
+  // minutes, active = only the hands-on (✋ actief) ones. Fills the tijden inputs so the
+  // numbers can still be tweaked by hand; nothing persists until Opslaan.
+  const recalcTimes = () => setForm(f => {
+    const mins = f.steps.map(s => {
+      const n = s.minutes === "" ? 0 : Number(s.minutes);
+      return Number.isFinite(n) && n >= 0 ? n : 0;
+    });
+    const total  = mins.reduce((a, n) => a + n, 0);
+    const active = f.steps.reduce((a, s, i) => a + (s.mode === "passive" ? 0 : mins[i]), 0);
+    return { ...f, totalTime: String(total), activeTime: String(active) };
+  });
   const saveEdit = async () => {
     const num = v => {
       if (v === "" || v == null) return undefined;
@@ -2045,6 +2057,23 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
                       inputMode="numeric" placeholder="15" aria-label="Actieve tijd in minuten"
                       style={{ ...fInput, textAlign: "center", fontVariantNumeric: "tabular-nums" }} />
                   </div>
+                </div>
+                {/* herbereken — vult beide tijdvelden opnieuw uit de stappen (blijft handmatig aanpasbaar) */}
+                <div>
+                  <button className="kg-ich-btn" onClick={recalcTimes}
+                    aria-label="Herbereken totale en actieve tijd uit de stappen"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "transparent",
+                      border: `2px dashed ${MATCHA}`, borderRadius: R_PILL, color: MATCHA_DP, fontSize: 13.5, fontWeight: 800,
+                      padding: "8px 16px", cursor: "pointer" }}>
+                    ⏱ Herbereken uit stappen
+                  </button>
+                  {form.steps.filter(s => s.minutes === "").length > 0 && (
+                    <div style={{ fontSize: 12, color: INK_SOFT, fontWeight: 700, marginTop: 6 }}>
+                      {form.steps.filter(s => s.minutes === "").length === 1
+                        ? "1 stap zonder minuten telt als 0"
+                        : `${form.steps.filter(s => s.minutes === "").length} stappen zonder minuten tellen als 0`}
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label style={fLabel}>Tags (komma-gescheiden)</label>
