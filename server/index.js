@@ -16,9 +16,39 @@ import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, unlink
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { processUrl } from "../engine/enrich-recipes.mjs";
+import lock from "./lock.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
+
+// ─── manual .env loader (no `dotenv` dependency) ─────────────────────────────
+// Reads .env from the repo root, once, before anything below reads
+// process.env (LOCK_PASSPHRASE / LOCK_SESSION_SECRET in particular). Only sets
+// a var that isn't already in the environment, so real process env (PM2
+// ecosystem config, shell export) always wins over the file. Comments (#) and
+// blank lines are skipped; values may be wrapped in single or double quotes.
+(function loadDotEnv() {
+  try {
+    const envPath = path.join(REPO_ROOT, ".env");
+    if (!existsSync(envPath)) return;
+    const raw = readFileSync(envPath, "utf8");
+    for (const line of raw.split(/\r?\n/)) {
+      const t = line.trim();
+      if (!t || t.startsWith("#")) continue;
+      const eq = t.indexOf("=");
+      if (eq <= 0) continue;
+      const key = t.slice(0, eq).trim();
+      let val = t.slice(eq + 1).trim();
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      if (!(key in process.env)) process.env[key] = val;
+    }
+  } catch (e) {
+    console.warn("[env] failed to load .env:", e?.message || e);
+  }
+})();
+
 const DATA_DIR = path.join(REPO_ROOT, "data");
 const RECIPES_DIR = path.join(DATA_DIR, "recipes");
 // Photo inbox: a phone snapshot of a cookbook page / recipe card parks here as
@@ -180,6 +210,7 @@ function readPhotoInbox() {
 }
 
 const app = express();
+app.use(lock); // FIRST middleware — gates everything below, including static + /api
 // Every route keeps the SMALL default body limit (~100kb) — except the photo
 // upload, which brings its own 25mb parser. The global parser has to step aside
 // for that one path, or it would 413 a phone photo before the route ever runs.
