@@ -14,8 +14,8 @@
 //
 // Bump CACHE on every shape change so `activate` purges the previous version's
 // pinned shell from already-installed clients.
-const CACHE = "ichikawa-v2";
-const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/icon.svg"];
+const CACHE = "ichikawa-v4";
+const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/icon.svg?v=2", "/apple-touch-icon.png?v=2"];
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();

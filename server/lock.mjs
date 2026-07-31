@@ -24,6 +24,13 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 const COOKIE_NAME = "ichikawa_lock";
 const TTL_SECONDS = 30 * 24 * 3600; // ~30 days
 
+// Public app-shell assets pass the gate. An icon or manifest request can arrive
+// WITHOUT the session cookie (iOS fetches the apple-touch-icon when the app is
+// added to the home screen), and answering it with the lock page's HTML at 200
+// hands the OS an "image" that is not one — that is how you get a blank
+// letter-tile icon. These files carry no data worth gating.
+const PUBLIC_ASSETS = new Set(["/icon.svg", "/apple-touch-icon.png", "/manifest.webmanifest", "/favicon.ico", "/sw.js"]);
+
 const b64u = (buf) => Buffer.from(buf).toString("base64url");
 const unb64u = (str) => Buffer.from(str, "base64url");
 
@@ -113,6 +120,16 @@ function cookieHeader(token, req) {
   const bits = [`${COOKIE_NAME}=${token}`, "HttpOnly", "SameSite=Lax", "Path=/", `Max-Age=${TTL_SECONDS}`];
   if (isHttps(req)) bits.push("Secure");
   return bits.join("; ");
+}
+
+// Cloudflare's cache key ignores cookies, so a cacheable lock-gate response gets
+// stored under whatever URL was requested — including asset URLs like icon.svg —
+// and then served to authenticated users too. Every response the gate itself
+// produces must opt out of caching at the edge, not just the browser.
+function noStore(res) {
+  res.setHeader("Cache-Control", "no-store, private, max-age=0");
+  res.setHeader("Vary", "Cookie");
+  return res;
 }
 
 // Read the raw request body — only ever called for POST /__unlock, before any
@@ -236,7 +253,7 @@ export default function lock(req, res, next) {
         const supplied = extractPassphrase(raw, ct);
         if (!cookieSecret()) {
           console.error("[lock] LOCK_SESSION_SECRET is not set — cannot issue a session");
-          res.status(500).send(lockPageHtml({ wrong: true }));
+          noStore(res).status(500).send(lockPageHtml({ wrong: true }));
           return;
         }
         if (safeEqual(supplied, pass)) {
@@ -244,23 +261,30 @@ export default function lock(req, res, next) {
           res.writeHead(302, { Location: "/" });
           res.end();
         } else {
-          res.status(401).send(lockPageHtml({ wrong: true }));
+          noStore(res).status(401).send(lockPageHtml({ wrong: true }));
         }
       })
       .catch(() => {
-        res.status(400).send(lockPageHtml({ wrong: true }));
+        noStore(res).status(400).send(lockPageHtml({ wrong: true }));
       });
     return;
   }
+
+  // Public app-shell assets pass the gate. An icon or manifest request can arrive
+  // WITHOUT the session cookie (iOS fetches the apple-touch-icon when the app is
+  // added to the home screen), and answering it with the lock page's HTML at 200
+  // hands the OS an "image" that is not one — that is how you get a blank
+  // letter-tile icon. These files carry no data worth gating.
+  if (req.method === "GET" && PUBLIC_ASSETS.has(req.path)) return next();
 
   if (verifyToken(readCookie(req, COOKIE_NAME))) return next();
 
   // /api/* always gets JSON, regardless of method — a script/fetch client should
   // never have to parse HTML to discover it's locked out.
   if (req.method === "GET" && !req.path.startsWith("/api/")) {
-    res.status(200).send(lockPageHtml());
+    noStore(res).status(200).send(lockPageHtml());
     return;
   }
 
-  res.status(401).json({ error: "locked" });
+  noStore(res).status(401).json({ error: "locked" });
 }
