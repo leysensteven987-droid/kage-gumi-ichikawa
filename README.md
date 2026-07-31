@@ -2,12 +2,27 @@
 
 A personal, single-user app that turns a **recipe library into a weekly shopping list**,
 then plots the pickup route through the **Jumbo Gent** store. The UI is a soft, fluffy
-**kawaii-bento** surface: a recipe grid (RECEPTEN), a weekly bento tray (WEEKPLAN), a
-generated boodschappenlijst, and an in-store route map.
+**kawaii-bento** surface: a recipe grid (RECIPES), a weekly bento tray (PLAN), a
+generated shopping list, and an in-store route map.
 
 Recipes come from a personal **HelloFresh corpus** (scraped by the engine below); a
 committed seed (`data/recipes.sample.json`) keeps the app rendering on a fresh checkout
 with no personal data.
+
+## Language
+
+The **interface is English** — every label, button, filter, empty state, aisle name and
+error message. **Recipe content is not**: titles, subtitles, cuisine, tags, ingredient
+names, step text and parallel tips render verbatim from the corpus and stay in whatever
+language the recipe was written in (mostly Dutch, from HelloFresh BE).
+
+Two consequences worth knowing before editing:
+
+- The store lexicon in `data/jumbo-gent-store.json` splits the same way — zone `label`s
+  are English, but every `keywords` entry (and every zone `id`) stays Dutch, because the
+  keywords have to match Dutch ingredient names. Translating a keyword breaks routing.
+- `CUISINE` in `IchikawaSurface.jsx` is keyed on the corpus' own cuisine values
+  (`"Italiaans"`, `"Vis"`, …). Those are lookup keys, not copy — only the emoji is shown.
 
 ## Lineage
 
@@ -42,7 +57,7 @@ npm run enrich    # normalize recipe pages -> data/recipes/<id>.json   (pass URL
 npm run clean     # one-off: re-clean titles/steps across the corpus in place
 ```
 
-The same normalizer is exposed in-app: **RECEPTEN → ＋ Recept via URL** (phone and
+The same normalizer is exposed in-app: **RECIPES → ＋ Add a recipe** (phone and
 desk) posts a link to `POST /api/recipes/add`, which pulls the page's schema.org
 recipe into `data/recipes/<id>.json` and drops the dish straight into the library —
 no command line needed for a one-off add.

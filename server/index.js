@@ -198,15 +198,15 @@ app.get("/api/recipes", (_req, res) => {
 // without the command line. Returns the normalized recipe so the UI can show it at once.
 app.post("/api/recipes/add", async (req, res) => {
   const url = typeof req.body?.url === "string" ? req.body.url.trim() : "";
-  if (!url) return res.status(400).json({ error: "geef een recept-URL op" });
+  if (!url) return res.status(400).json({ error: "please provide a recipe URL" });
   let parsed;
   try {
     parsed = new URL(url);
   } catch {
-    return res.status(400).json({ error: "dat lijkt geen geldige URL" });
+    return res.status(400).json({ error: "that does not look like a valid URL" });
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return res.status(400).json({ error: "alleen http(s)-links kunnen worden toegevoegd" });
+    return res.status(400).json({ error: "only http(s) links can be added" });
   }
   try {
     // Bound the whole fetch+render so a slow/blocking site fails with a message
@@ -220,11 +220,11 @@ app.post("/api/recipes/add", async (req, res) => {
     const msg = err?.message || String(err);
     console.error(`[ichikawa] add-from-URL failed for ${url}:`, msg);
     if (msg === "__timeout__") {
-      return res.status(504).json({ error: "de pagina duurde te lang om te laden — probeer 't opnieuw" });
+      return res.status(504).json({ error: "the page took too long to load — please try again" });
     }
     // No recipe markup, network/Datadome block, etc. — gentle human message; the
     // technical reason stays in the server log above.
-    return res.status(422).json({ error: "geen recept gevonden op die pagina" });
+    return res.status(422).json({ error: "no recipe found on that page" });
   }
 });
 
@@ -336,20 +336,20 @@ app.put("/api/recipes/:id", (req, res) => {
 app.post(PHOTO_UPLOAD_PATH, express.json({ limit: "25mb" }), (req, res) => {
   const dataUrl = typeof req.body?.dataUrl === "string" ? req.body.dataUrl : "";
   const m = /^data:([a-z0-9.+/-]+);base64,(.*)$/is.exec(dataUrl.trim());
-  if (!m) return res.status(400).json({ error: "geen geldige foto ontvangen" });
+  if (!m) return res.status(400).json({ error: "no valid photo received" });
   const mime = m[1].toLowerCase();
   const ext = PHOTO_MIME_EXT[mime];
-  if (!ext) return res.status(400).json({ error: "dat bestandstype kan ik niet bewaren — gebruik een foto (JPG, PNG, WEBP of HEIC)" });
+  if (!ext) return res.status(400).json({ error: "I cannot store that file type — use a photo (JPG, PNG, WEBP or HEIC)" });
 
   let buf;
   try {
     buf = Buffer.from(m[2], "base64");
   } catch {
-    return res.status(400).json({ error: "geen geldige foto ontvangen" });
+    return res.status(400).json({ error: "no valid photo received" });
   }
-  if (!buf.length) return res.status(400).json({ error: "geen geldige foto ontvangen" });
+  if (!buf.length) return res.status(400).json({ error: "no valid photo received" });
   if (buf.length > MAX_PHOTO_BYTES) {
-    return res.status(413).json({ error: "die foto is te groot (max 15 MB) — maak 'm wat kleiner" });
+    return res.status(413).json({ error: "that photo is too large (max 15 MB) — please shrink it" });
   }
 
   try {
@@ -368,7 +368,7 @@ app.post(PHOTO_UPLOAD_PATH, express.json({ limit: "25mb" }), (req, res) => {
     return res.json({ ok: true, item });
   } catch (err) {
     console.error("[ichikawa] photo save failed:", err?.message || err);
-    return res.status(500).json({ error: "de foto kon niet bewaard worden" });
+    return res.status(500).json({ error: "the photo could not be saved" });
   }
 });
 
@@ -377,7 +377,7 @@ app.post(PHOTO_UPLOAD_PATH, express.json({ limit: "25mb" }), (req, res) => {
 // answer with the same friendly Dutch line the handler's own size check uses.
 app.use((err, req, res, next) => {
   if (req.path === PHOTO_UPLOAD_PATH && (err?.type === "entity.too.large" || err?.status === 413)) {
-    return res.status(413).json({ error: "die foto is te groot (max 15 MB) — maak 'm wat kleiner" });
+    return res.status(413).json({ error: "that photo is too large (max 15 MB) — please shrink it" });
   }
   return next(err);
 });

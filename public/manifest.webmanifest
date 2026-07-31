@@ -1,6 +1,8 @@
 {
   "name": "Ichikawa — Market Scout",
   "short_name": "Ichikawa",
+  "lang": "en",
+  "description": "Turn your recipe library into a weekly plan, a merged shopping list and a walking route through the store.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#FFF6EA",

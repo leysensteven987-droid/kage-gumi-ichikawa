@@ -1,4 +1,5 @@
 /**
+ * @vibe-author STLE @version 10 @date 30JUL26 @comment Interface is nu Engels — alle UI-copy, dag/maand-labels, filters, winkelzones en servermeldingen vertaald; recepten (titels, stappen, ingrediënten, keuken) blijven in hun eigen taal
  * @vibe-author STLE @version 9 @date 23JUL26 @comment Foto-inbox — recept fotograferen en bewaren; Ichikawa zet hem later om in een recept
  * @vibe-author STLE @version 8 @date 23JUL26 @comment Tijden volgen nu automatisch de stappen; handmatig ingevulde tijden blijven behouden
  * @vibe-author STLE @version 7 @date 23JUL26 @comment Herbereken-knop in de editor — totale + actieve tijd opnieuw berekend uit de stappen
@@ -12,27 +13,33 @@ import { buildRoute } from "./lib/jumboRoute.js";
 /* ──────────────────────────────────────────────────────────────────────────
    ICHIKAWA · 市川 · MARKET SCOUT   (kage-gumi personal operative)
 
-   "DE DAGRONDE" — a phone-first, one-thumb kitchen companion. The surface is
-   organised around the three real jobs, each its own MODE (persisted):
+   "THE DAILY ROUND" — a phone-first, one-thumb kitchen companion. The surface
+   is organised around the three real jobs, each its own MODE (persisted):
 
-     • 献 PLAN — couch job. Week bento rail (7 days, snap-scroll), porties +
-                 eiwitbalans summary, and the recipe library as big tap rows
-                 (search / soort / tijd / tag filters kept).
+     • 献 PLAN — couch job. Week bento rail (7 days, snap-scroll), servings +
+                 protein-balance summary, and the recipe library as big tap rows
+                 (search / kind / time / tag filters kept).
      • 買 SHOP — standing-in-the-aisle job. The walk-ordered checklist with
                  52px whole-row taps, and the SIGNATURE paw-print trail: the
-                 cat scout's route INGANG → aisles → KASSA. A completed aisle
-                 earns a paw stamp. Floorplan modal kept.
-     • 火 KOOK — at-the-stove job. Tonight's dish: act/wait split, mise en
+                 cat scout's route ENTRANCE → aisles → CHECKOUT. A completed
+                 aisle earns a paw stamp. Floorplan modal kept.
+     • 火 COOK — at-the-stove job. Tonight's dish: act/wait split, mise en
                  place, and the per-phase step timeline inline.
+
+   INTERFACE LANGUAGE: English. Recipe CONTENT (titles, subtitles, cuisine,
+   tags, ingredient names, step text, parallel tips) is rendered verbatim from
+   the corpus and stays in its own language — it is data, never chrome. The same
+   split holds in the store lexicon: zone LABELS are English, the ingredient
+   KEYWORDS that classify them stay Dutch because the ingredients are.
 
    The weekly plan, servings, checklist ticks and mode PERSIST in localStorage
    (kg-ich-*) — a grocery tool must survive a reload in the aisle.
 
-   ≥1100px — the "MANAGEMENT DESK" (desktop is for PLANNING the dagronde, the
-   phone for executing it). ONE JS breakpoint (WIDE_MQ) flips the shell: the
+   ≥1100px — the "MANAGEMENT DESK" (desktop is for PLANNING the daily round,
+   the phone for executing it). ONE JS breakpoint (WIDE_MQ) flips the shell: the
    SAME section renderers rearrange into three columns — 献 PLAN (week board +
-   porties + stats) | 皿 BIBLIOTHEEK (curation, card grid, '/' focuses search)
-   | a 買 SHOP / 火 KOOK side panel (S / K keys). Nothing is duplicated: below
+   servings + stats) | 皿 LIBRARY (curation, card grid, '/' focuses search)
+   | a 買 SHOP / 火 COOK side panel (S / K keys). Nothing is duplicated: below
    the breakpoint the phone composition renders exactly as before, and all
    state/persistence/API wiring is shared. Sheets become centered modals on
    the desk; hover lifts are gated behind @media(hover:hover).
@@ -80,17 +87,17 @@ const R_LG = 26, R_MD = 18, R_SM = 12, R_PILL = 999;
 const F_ROUND   = "'M PLUS Rounded 1c','Baloo 2',ui-rounded,'Segoe UI',system-ui,sans-serif";
 const F_DISPLAY = "'Baloo 2','M PLUS Rounded 1c',ui-rounded,system-ui,sans-serif";
 
-// The week plans all 7 days (MA–ZO). Six distinct recipes fill the seven day-
-// slots: the "verras me" randomizer cooks Tuesday's dish twice (DI + WO), so a
-// full week is 6 recipes over 7 dinners. Manual planning honours the same cap.
+// The week plans all 7 days (MON–SUN). Six distinct recipes fill the seven day-
+// slots: the "surprise me" randomizer cooks Tuesday's dish twice (TUE + WED), so
+// a full week is 6 recipes over 7 dinners. Manual planning honours the same cap.
 const MAX_DINNERS = 7;
 
-// Fixed leftover pairing for the randomizer: the recipe placed on DINSDAG (day
-// index 1) is also served WOENSDAG (index 2) — one cook, two dinners. Every
-// other day gets its own recipe. Day indices follow DAY_ABBR (MA=0 … ZO=6).
-const LEFTOVER_FROM = 1; // dinsdag
-const LEFTOVER_TO   = 2; // woensdag
-// pick-index per day slot: MA,DI,WO,DO,VR,ZA,ZO → 6 distinct recipes (DI==WO).
+// Fixed leftover pairing for the randomizer: the recipe placed on TUESDAY (day
+// index 1) is also served WEDNESDAY (index 2) — one cook, two dinners. Every
+// other day gets its own recipe. Day indices follow DAY_ABBR (MON=0 … SUN=6).
+const LEFTOVER_FROM = 1; // tuesday
+const LEFTOVER_TO   = 2; // wednesday
+// pick-index per day slot: MON..SUN → 6 distinct recipes (TUE==WED).
 const RANDOM_DAY_PICKS = [0, 1, 1, 2, 3, 4, 5];
 
 // ONE JS breakpoint — the single place a width lives. Desktop CSS keys off the
@@ -98,7 +105,9 @@ const RANDOM_DAY_PICKS = [0, 1, 1, 2, 3, 4, 5];
 const WIDE_MQ = "(min-width: 1100px)";
 
 // Cuisine → food-tile glyph + PASTEL gradient. Self-contained (no external
-// images) so the surface renders identically offline on the box.
+// images) so the surface renders identically offline on the box. The KEYS match
+// the corpus' own `cuisine` values (recipe data, so Dutch) — they are lookup
+// keys, not interface copy; the tile shows only the emoji.
 const CUISINE = {
   "Midden-Oosters": { emoji: "🥙", a: "#FFE7C2", b: "#FFD3DE" },
   "Italiaans":      { emoji: "🍝", a: "#FFE1CC", b: "#FFC7D0" },
@@ -109,10 +118,10 @@ const CUISINE = {
 };
 const cuisineOf = c => CUISINE[c] || { emoji: "🍽️", a: "#FFE7C2", b: "#FFD3DE" };
 
-// Time-filter buckets (totalTime, minutes). "Alles" = no filter (max:null); a recipe
+// Time-filter buckets (totalTime, minutes). "All" = no filter (max:null); a recipe
 // with no totalTime only ever shows there, never under a numeric bucket.
 const TIME_BUCKETS = [
-  { key: "all", label: "Alles",     max: null },
+  { key: "all", label: "All",       max: null },
   { key: "20",  label: "≤ 20 min",  max: 20 },
   { key: "30",  label: "≤ 30 min",  max: 30 },
   { key: "45",  label: "≤ 45 min",  max: 45 },
@@ -173,11 +182,11 @@ function categoryOf(r) {
 
 // Main-category filter chips. "all" = no filter.
 const CATEGORY_FILTERS = [
-  { key: "all",     label: "Alles", emoji: "" },
-  { key: "meat",    label: "Vlees", emoji: "🥩" },
-  { key: "chicken", label: "Kip",   emoji: "🐔" },
-  { key: "fish",    label: "Vis",   emoji: "🐟" },
-  { key: "veg",     label: "Vega",  emoji: "🥗" },
+  { key: "all",     label: "All",     emoji: "" },
+  { key: "meat",    label: "Meat",    emoji: "🥩" },
+  { key: "chicken", label: "Chicken", emoji: "🐔" },
+  { key: "fish",    label: "Fish",    emoji: "🐟" },
+  { key: "veg",     label: "Veggie",  emoji: "🥗" },
 ];
 
 // ─── Theme-aware ground tokens ──────────────────────────────────────────────
@@ -192,10 +201,10 @@ const G_MUTED = `var(--kg-text-muted, ${INK_SOFT})`;
 const G_LINE  = `var(--kg-border, ${LINE})`;
 const G_DOTS  = `color-mix(in srgb, var(--kg-border, ${LINE}) 60%, transparent)`;
 
-// ─── Week helpers — tonight-hero + 7-day weekmenu rail ──────────────────────
-const DAY_ABBR = ["MA", "DI", "WO", "DO", "VR", "ZA", "ZO"];
-const DAY_FULL = ["MAANDAG", "DINSDAG", "WOENSDAG", "DONDERDAG", "VRIJDAG", "ZATERDAG", "ZONDAG"];
-const MON_ABBR = ["JAN", "FEB", "MRT", "APR", "MEI", "JUN", "JUL", "AUG", "SEP", "OKT", "NOV", "DEC"];
+// ─── Week helpers — tonight-hero + 7-day week-menu rail ─────────────────────
+const DAY_ABBR = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
+const DAY_FULL = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"];
+const MON_ABBR = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 function weekInfo(now = new Date()) {
   const todayIdx = (now.getDay() + 6) % 7; // Monday = 0
   const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - todayIdx);
@@ -208,21 +217,21 @@ function weekInfo(now = new Date()) {
 }
 const fmtD = d => `${String(d.getDate()).padStart(2, "0")} ${MON_ABBR[d.getMonth()]}`;
 
-// "3 u 40" style duration for the week-stats panel.
+// "3 h 40" style duration for the week-stats panel.
 function fmtDur(min) {
   const m = Math.round(Number(min) || 0);
   if (m < 60) return `${m} min`;
   const h = Math.floor(m / 60), r = m % 60;
-  return r ? `${h} u ${String(r).padStart(2, "0")}` : `${h} u`;
+  return r ? `${h} h ${String(r).padStart(2, "0")}` : `${h} h`;
 }
 
-// Protein-category meta for the weekmenu day cards + eiwitbalans meter.
-// Kawaii-mapped: vlees=azuki, kip=tamago, vis=ramune, vega=matcha.
+// Protein-category meta for the week-menu day cards + protein-balance meter.
+// Kawaii-mapped: meat=azuki, chicken=tamago, fish=ramune, veggie=matcha.
 const CAT_META = {
-  meat:    { label: "VLEES", bar: AZUKI,  fg: AZUKI },
-  chicken: { label: "KIP",   bar: TAMAGO, fg: "#C58A16" },
-  fish:    { label: "VIS",   bar: RAMUNE, fg: RAMUNE_DP },
-  veg:     { label: "VEGA",  bar: MATCHA, fg: MATCHA_DP },
+  meat:    { label: "MEAT",    bar: AZUKI,  fg: AZUKI },
+  chicken: { label: "CHICKEN", bar: TAMAGO, fg: "#C58A16" },
+  fish:    { label: "FISH",    bar: RAMUNE, fg: RAMUNE_DP },
+  veg:     { label: "VEGGIE",  bar: MATCHA, fg: MATCHA_DP },
 };
 
 // Section heading — label + fading rule + right-hand stamp, kawaii-skinned.
@@ -267,10 +276,12 @@ function cookTiming(r) {
   active = Math.min(Math.max(0, active), total);
   const passive = Math.max(0, total - active);
   const longestPassive = steps.filter(s => s.mode === "passive").sort((a, b) => (b.minutes || 0) - (a.minutes || 0))[0];
+  // A recipe's own parallelTip is recipe DATA — shown verbatim in its own
+  // language. Only the generated fallback below is interface copy.
   const tip =
     r.parallelTip ||
     (longestPassive
-      ? `Slim: terwijl "${longestPassive.text}" (${longestPassive.minutes}′) loopt, bereid je alvast de andere onderdelen voor.`
+      ? `Smart: while "${longestPassive.text}" (${longestPassive.minutes}′) runs, get the other components ready.`
       : "");
   return { steps, total, active, passive, tip };
 }
@@ -298,9 +309,9 @@ function lsWrite(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); }
 // The three modes — each maps to one real job (couch / aisle / stove).
 const MODES = [
   { id: "plan", k: "献", label: "Plan" },
-  { id: "lib",  k: "皿", label: "Recepten" },
+  { id: "lib",  k: "皿", label: "Recipes" },
   { id: "shop", k: "買", label: "Shop" },
-  { id: "cook", k: "火", label: "Kook" },
+  { id: "cook", k: "火", label: "Cook" },
 ];
 
 // Grocery-line identity: name + unit (unit-aware dedupe key, also the tick key).
@@ -407,7 +418,7 @@ function Paw({ size = 16, color = SAKURA_DP, style, className }) {
 // Bento-cell meter — 5 lacquer compartments filling with sakura as diners land.
 function BentoMeter({ filled, total = MAX_DINNERS, cell = 20 }) {
   return (
-    <div role="img" aria-label={`${filled} van ${total} diners gepland`}
+    <div role="img" aria-label={`${filled} of ${total} dinners planned`}
       style={{ display: "flex", gap: 5, padding: 5, background: LACQUER, borderRadius: 10 }}>
       {Array.from({ length: total }, (_, i) => (
         <span key={i} style={{ width: cell, height: cell, borderRadius: 6,
@@ -513,9 +524,9 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   const [addBusy, setAddBusy] = useState(false);   // URL request in flight
   const [addErr, setAddErr]   = useState(null);    // inline error in the sheet
   const [addNote, setAddNote] = useState(null);    // success toast
-  // ── Foto-inbox: photographed recipe pages waiting to be turned into recipes.
-  // Pure storage — nothing here calls an AI; a Claude Code sessie leest de wachtrij
-  // later uit en schrijft er echte recepten van.
+  // ── Photo inbox: photographed recipe pages waiting to be turned into recipes.
+  // Pure storage — nothing here calls an AI; a Claude Code session reads the queue
+  // later and writes real recipes from it.
   const [photoInbox, setPhotoInbox] = useState([]); // pending sidecars, newest first
   const [photoBusy, setPhotoBusy]   = useState(false); // upload in flight
   const [photoErr, setPhotoErr]     = useState(null);  // inline error in the sheet
@@ -630,17 +641,17 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     });
   }
 
-  // ── Weekrandomizer — "verras me" ────────────────────────────────────────────
-  // Fills the whole week (MA–ZO) with SIX random distinct recipes: five days get
-  // their own dish, and DINSDAG's dish is repeated WOENSDAG (cook once, eat
+  // ── Week randomizer — "surprise me" ─────────────────────────────────────────
+  // Fills the whole week (MON–SUN) with SIX random distinct recipes: five days
+  // get their own dish, and TUESDAY's dish is repeated WEDNESDAY (cook once, eat
   // twice). That is 6 recipes over 7 dinners. Picks from the live library minus
   // any card the user soft-removed. With fewer than six recipes available it
   // fills leading days only (staying dense — no holes to break persistence) and
-  // still doubles DI→WO whenever there are at least two dishes to work with.
+  // still doubles TUE→WED whenever there are at least two dishes to work with.
   const shuffleWeek = useCallback(() => {
     const pool = recipes.filter(r => !removedIds.has(r.id));
     if (pool.length === 0) {
-      setRemoveNote("Nog geen recepten om uit te kiezen — vul eerst je bibliotheek. 🍙");
+      setRemoveNote("No recipes to pick from yet — fill your library first. 🍙");
       setTimeout(() => setRemoveNote(null), 3500);
       return;
     }
@@ -659,7 +670,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
       week.push(pick[idx]);
     }
     setSelected(week);
-    setHeroIdx(null); // let "vanavond" resolve to today again
+    setHeroIdx(null); // let "tonight" resolve to today again
   }, [recipes, removedIds]);
 
   // Soft-remove a recipe card: optimistic drop, POST to persist (keep:false on its
@@ -671,7 +682,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
       if (!res.ok) throw new Error(String(res.status));
     } catch {
       setRemovedIds(prev => { const n = new Set(prev); n.delete(r.id); return n; });
-      setRemoveNote(`Kon "${r.title}" niet verwijderen: kaartje teruggezet.`);
+      setRemoveNote(`Couldn't remove "${r.title}" — card put back.`);
       setTimeout(() => setRemoveNote(null), 3500);
     }
   }
@@ -700,8 +711,8 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     }
   }, [recipes]);
 
-  // Persist a FULL recipe edit (title / tags / porties / tijden / stappen /
-  // ingrediënten — any subset). Optimistic: apply the patch to the in-memory
+  // Persist a FULL recipe edit (title / tags / servings / times / steps /
+  // ingredients — any subset). Optimistic: apply the patch to the in-memory
   // corpus + the open sheet so everything (timeline, shopping list, header)
   // re-renders at once, then PUT it. On success adopt the server's sanitized
   // merged recipe; on failure roll both back and rethrow so the sheet surfaces
@@ -747,7 +758,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
         body: JSON.stringify({ url }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.recipe) throw new Error(data.error || "toevoegen mislukt");
+      if (!res.ok || !data.recipe) throw new Error(data.error || "adding failed");
       const recipe = data.recipe;
       setRecipes(prev => [recipe, ...prev.filter(r => r.id !== recipe.id)]);
       setRemovedIds(prev => {
@@ -756,17 +767,17 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
       });
       setAddUrl("");
       setAddOpen(false);
-      setAddNote(`"${recipe.title}" toegevoegd 🍱`);
+      setAddNote(`"${recipe.title}" added 🍱`);
       setTimeout(() => setAddNote(null), 3500);
     } catch (err) {
-      setAddErr(err.message || "toevoegen mislukt");
+      setAddErr(err.message || "adding failed");
     } finally {
       setAddBusy(false);
     }
   }
 
   // Photograph a cookbook page → the server just STORES it (no AI call, no key,
-  // no cost). The photo lands in the foto-inbox and Ichikawa turns it into a real
+  // no cost). The photo lands in the photo inbox and Ichikawa turns it into a real
   // recipe later. Returns true on success so the sheet can clear its own fields.
   async function handleAddPhoto(file, note) {
     if (!file || photoBusy) return false;
@@ -777,7 +788,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
       const dataUrl = await new Promise((resolve, reject) => {
         const fr = new FileReader();
         fr.onload = () => resolve(String(fr.result || ""));
-        fr.onerror = () => reject(new Error("de foto kon niet gelezen worden"));
+        fr.onerror = () => reject(new Error("the photo could not be read"));
         fr.readAsDataURL(file);
       });
       const res = await fetch("/api/recipes/photo", {
@@ -786,12 +797,12 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
         body: JSON.stringify({ dataUrl, note: note || "" }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.ok) throw new Error(data.error || "de foto kon niet bewaard worden");
+      if (!res.ok || !data.ok) throw new Error(data.error || "the photo could not be saved");
       await loadPhotoInbox();
-      setPhotoOk("Foto opgeslagen — Ichikawa verwerkt hem later. 📷");
+      setPhotoOk("Photo saved — Ichikawa will process it later. 📷");
       return true;
     } catch (err) {
-      setPhotoErr(err.message || "de foto kon niet bewaard worden");
+      setPhotoErr(err.message || "the photo could not be saved");
       return false;
     } finally {
       setPhotoBusy(false);
@@ -804,7 +815,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
       const res = await fetch(`/api/recipes/photo/${encodeURIComponent(id)}`, { method: "DELETE" });
       if (!res.ok) throw new Error(String(res.status));
     } catch {
-      setRemoveNote("Foto verwijderen lukte niet 😖");
+      setRemoveNote("Deleting the photo didn't work 😖");
       setTimeout(() => setRemoveNote(null), 3000);
     }
     await loadPhotoInbox();
@@ -830,12 +841,14 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
           const cur = acc.get(key);
           cur.qty += add;
           cur.from += 1;
-          if (!cur.days.includes(slot)) cur.days.push(slot); // which weekmenu day needs it
+          if (!cur.days.includes(slot)) cur.days.push(slot); // which week-menu day needs it
         } else {
           acc.set(key, { name, unit, qty: add, from: 1, days: [slot] });
         }
       }
     });
+    // Sorted with the Dutch collator: the NAMES are ingredient data from the
+    // corpus, not interface copy, so they keep their own language's ordering.
     return [...acc.values()].sort((a, b) => a.name.localeCompare(b.name, "nl"));
   }, [selected, servings, byId]);
 
@@ -851,16 +864,16 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   );
   const allDone = shoppingList.length > 0 && checkedCount === shoppingList.length;
 
-  // Week frame (MA..ZO of the current week) + the "vanavond" hero slot.
-  // Slot i of the plan = weekday i (MA..VR); hero = today's slot if filled,
-  // else the first filled slot; "Recept wisselen" pins the next one.
+  // Week frame (MON..SUN of the current week) + the "tonight" hero slot.
+  // Slot i of the plan = weekday i (MON..SUN); hero = today's slot if filled,
+  // else the first filled slot; "Switch recipe" pins the next one.
   const { todayIdx, days: weekDays, week: weekNr } = useMemo(() => weekInfo(), []);
   const autoHero = selected[todayIdx] != null ? todayIdx : (selected.length ? 0 : -1);
   const hIdx = heroIdx != null && heroIdx < selected.length ? heroIdx : autoHero;
   const heroRecipe = hIdx >= 0 ? byId(selected[hIdx]) : null;
   const heroT = heroRecipe ? cookTiming(heroRecipe) : null;
 
-  // Aggregate week stats for the PLAN summary (times + eiwitbalans).
+  // Aggregate week stats for the PLAN summary (times + protein balance).
   const weekStats = useMemo(() => {
     let total = 0, active = 0;
     const cats = { meat: 0, chicken: 0, fish: 0, veg: 0 };
@@ -874,7 +887,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     return { total, active, cats };
   }, [selected, byId, catById]);
 
-  // Jump to the library. On the phone the bibliotheek is its OWN mode tab now, so
+  // Jump to the library. On the phone the library is its OWN mode tab now, so
   // just switch to it; on the desk it's an always-visible column, so scroll it in.
   const goPlanLibrary = useCallback(() => {
     if (wide) {
@@ -893,7 +906,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   const loadingCard = (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, padding: "56px 0", color: G_MUTED }}>
       <Mascot type="matcha" size={78} />
-      <span style={{ fontSize: 15, fontWeight: 700 }}>Matcha-kun haalt de recepten op…</span>
+      <span style={{ fontSize: 15, fontWeight: 700 }}>Matcha-kun is fetching the recipes…</span>
     </div>
   );
 
@@ -905,12 +918,12 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     return (
           <div role="status" style={{ background: "#FFF5DE", color: "#C58A16", fontSize: 13, fontWeight: 700,
             borderRadius: R_MD, padding: "10px 14px", boxShadow: SHADOW_SOFT, lineHeight: 1.55 }}>
-            📡 Offline — de bibliotheek is niet bereikbaar, je ziet een mini-set. Je weekplan en vinkjes blijven bewaard.
+            📡 Offline — the library is unreachable, so you're seeing a mini set. Your week plan and ticks are still saved.
           </div>
     );
   }
 
-  // vanavond shortcut → 火 KOOK (on the desk it also flips the side panel)
+  // tonight shortcut → 火 COOK (on the desk it also flips the side panel)
   function renderTonight() {
     if (!heroRecipe || !heroT) return null;
     return (
@@ -920,7 +933,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
             <span style={{ fontSize: 27, flexShrink: 0 }}>{cuisineOf(heroRecipe.cuisine).emoji}</span>
             <span style={{ flex: 1, minWidth: 0 }}>
               <span style={{ display: "block", fontSize: 10.5, fontWeight: 800, letterSpacing: "0.24em", color: SAKURA_DP }}>
-                今夜 · VANAVOND
+                今夜 · TONIGHT
               </span>
               <span className="kg-ich-clamp1" style={{ display: "block", fontSize: 14.5, fontWeight: 800, color: INK, lineHeight: 1.35 }}>
                 {heroRecipe.title}
@@ -928,7 +941,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
             </span>
             <span style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 800, color: "#fff", background: SAKURA,
               borderRadius: R_PILL, padding: "8px 13px", whiteSpace: "nowrap", boxShadow: "0 6px 14px rgba(242,109,139,.3)" }}>
-              🔥 Kook · {heroT.total}′
+              🔥 Cook · {heroT.total}′
             </span>
           </button>
     );
@@ -938,10 +951,10 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   function renderWeekRail() {
     return (
         <section>
-          <SecTag k="献" label="Weekmenu" right={`WEEK ${weekNr} · ${fmtD(weekDays[0])} - ${fmtD(weekDays[6])}`} />
-          {/* weekrandomizer — vult MA–ZO met 6 recepten (DI-gerecht draait door naar WO) */}
+          <SecTag k="献" label="Week menu" right={`WEEK ${weekNr} · ${fmtD(weekDays[0])} - ${fmtD(weekDays[6])}`} />
+          {/* week randomizer — fills MON–SUN with 6 recipes (Tuesday's dish carries over to Wednesday) */}
           <button className="kg-ich-btn" onClick={shuffleWeek} disabled={!loaded || recipes.length === 0}
-            aria-label="Verras me — vul de hele week met willekeurige recepten"
+            aria-label="Surprise me — fill the whole week with random recipes"
             style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", textAlign: "left",
               marginBottom: 12, border: "none", borderRadius: R_LG, padding: "12px 15px",
               background: `linear-gradient(150deg, ${SAKURA}, ${AZUKI})`, color: "#fff",
@@ -950,25 +963,25 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
             <span className="kg-ich-dice" aria-hidden="true" style={{ fontSize: 26, flexShrink: 0 }}>🎲</span>
             <span style={{ flex: 1, minWidth: 0 }}>
               <span style={{ display: "block", fontSize: 10.5, fontWeight: 800, letterSpacing: "0.22em", opacity: 0.9 }}>
-                お任せ · VERRAS ME
+                お任せ · SURPRISE ME
               </span>
               <span style={{ display: "block", fontSize: 14.5, fontWeight: 800, lineHeight: 1.3 }}>
-                Vul mijn week — 6 recepten
+                Fill my week — 6 recipes
               </span>
             </span>
             <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 800, lineHeight: 1.35, textAlign: "right",
               background: "rgba(255,255,255,.22)", borderRadius: R_MD, padding: "6px 9px" }}>
-              DI + WO<br />zelfde gerecht
+              TUE + WED<br />same dish
             </span>
           </button>
-          <div className="kg-ich-rail" role="list" aria-label={`Weekmenu met ${selected.length} van ${MAX_DINNERS} geplande diners`}>
+          <div className="kg-ich-rail" role="list" aria-label={`Week menu with ${selected.length} of ${MAX_DINNERS} planned dinners`}>
             {weekDays.map((d, i) => {
               const isToday = i === todayIdx;
               const dnum = String(d.getDate()).padStart(2, "0");
               const dayHead = (
                 <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
                   <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.16em", color: isToday ? SAKURA_DP : undefined }}>
-                    {DAY_ABBR[i]}{isToday ? " · VANDAAG" : ""}
+                    {DAY_ABBR[i]}{isToday ? " · TODAY" : ""}
                   </span>
                   <span style={{ fontSize: 11, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{dnum}</span>
                 </span>
@@ -986,7 +999,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
                     {dayHead}
                     <span style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, width: "100%" }}>
                       <span style={{ fontSize: 22, lineHeight: 1 }}>＋</span>
-                      <span style={{ fontSize: 12.5, fontWeight: 700 }}>{firstEmpty ? "kies een gerecht" : "leeg"}</span>
+                      <span style={{ fontSize: 12.5, fontWeight: 700 }}>{firstEmpty ? "pick a dish" : "empty"}</span>
                     </span>
                   </button>
                 );
@@ -994,7 +1007,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
               const c = catById.get(id) || "veg";
               const cz = cuisineOf(r.cuisine);
               const time = r.totalTime || r.prepTime;
-              // Woensdag serving Dinsdag's dish again → leftovers (1× koken, 2× eten).
+              // Wednesday serving Tuesday's dish again → leftovers (cook once, eat twice).
               const isLeftover = i === LEFTOVER_TO && selected[LEFTOVER_FROM] === id;
               return (
                 <article key={i} role="listitem" className="kg-ich-day" onClick={() => setDetail(r)}
@@ -1003,7 +1016,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
                     boxShadow: i === hIdx ? `0 0 0 3px ${SAKURA}, ${SHADOW_SOFT}` : SHADOW_SOFT }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingRight: 20, color: "#C7A98F" }}>
                     <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.16em", color: isToday ? SAKURA_DP : INK_SOFT }}>
-                      {DAY_ABBR[i]}{isToday ? " · VANDAAG" : ""}
+                      {DAY_ABBR[i]}{isToday ? " · TODAY" : ""}
                     </span>
                     <span style={{ fontSize: 11, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{dnum}</span>
                   </div>
@@ -1021,10 +1034,10 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 4, alignSelf: "flex-start",
                       fontSize: 9.5, fontWeight: 800, letterSpacing: "0.1em", color: RAMUNE_DP,
                       background: "#E4F3F5", borderRadius: R_PILL, padding: "3px 8px" }}>
-                      ♻ RESTJE VAN DI
+                      ♻ LEFTOVERS FROM TUE
                     </span>
                   )}
-                  <button className="kg-ich-btn" aria-label={`"${r.title}" uit het weekmenu`}
+                  <button className="kg-ich-btn" aria-label={`Remove "${r.title}" from the week menu`}
                     onClick={e => { e.stopPropagation(); removeAt(i); }}
                     style={{ position: "absolute", top: 6, right: 6, width: 24, height: 24, borderRadius: "50%",
                       border: "none", background: "#FFE9EC", color: AZUKI, fontSize: 14, lineHeight: 1,
@@ -1037,19 +1050,19 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     );
   }
 
-  // porties + bento meter + leegmaken
+  // servings + bento meter + clear
   function renderPorties() {
     return (
         <section style={{ background: CARD, borderRadius: R_LG, padding: "13px 16px", boxShadow: SHADOW_SOFT,
           display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13.5, color: INK_SOFT, fontWeight: 800 }}>Porties</span>
+          <span style={{ fontSize: 13.5, color: INK_SOFT, fontWeight: 800 }}>Servings</span>
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-            <button className="kg-ich-btn" aria-label="minder porties" onClick={() => setServings(s => Math.max(1, s - 1))}
+            <button className="kg-ich-btn" aria-label="fewer servings" onClick={() => setServings(s => Math.max(1, s - 1))}
               style={{ width: 36, height: 36, borderRadius: "50%", border: "none", background: MATCHA, color: "#fff",
                 fontSize: 19, fontWeight: 800, boxShadow: SHADOW_SOFT, lineHeight: 1 }}>–</button>
             <span style={{ fontSize: 18, fontWeight: 800, minWidth: "1.6ch", textAlign: "center", color: INK,
               fontVariantNumeric: "tabular-nums" }}>{servings}</span>
-            <button className="kg-ich-btn" aria-label="meer porties" onClick={() => setServings(s => Math.min(12, s + 1))}
+            <button className="kg-ich-btn" aria-label="more servings" onClick={() => setServings(s => Math.min(12, s + 1))}
               style={{ width: 36, height: 36, borderRadius: "50%", border: "none", background: MATCHA, color: "#fff",
                 fontSize: 19, fontWeight: 800, boxShadow: SHADOW_SOFT, lineHeight: 1 }}>+</button>
           </div>
@@ -1059,7 +1072,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
               <button className="kg-ich-btn" onClick={() => setSelected([])}
                 style={{ background: "#fff", border: `2px solid ${LINE}`, borderRadius: R_PILL,
                   color: INK_SOFT, fontSize: 12.5, fontWeight: 800, padding: "8px 12px" }}>
-                Leegmaken
+                Clear
               </button>
             )}
           </div>
@@ -1067,20 +1080,20 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     );
   }
 
-  // week stats + eiwitbalans
+  // week stats + protein balance
   function renderWeekStats() {
     if (selected.length === 0) return null;
     return (
           <section style={{ background: RICE2, borderRadius: R_LG, padding: "16px 18px", boxShadow: SHADOW_SOFT }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-              <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.24em", textTransform: "uppercase", color: MATCHA_DP }}>均 · Deze week</span>
+              <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.24em", textTransform: "uppercase", color: MATCHA_DP }}>均 · This week</span>
               <Mascot type="tamago" size={30} bob={false} style={{ marginLeft: "auto", marginTop: -4 }} />
             </div>
             {[
-              ["DINERS", `${selected.length} / ${MAX_DINNERS}`],
-              ["KOOKTIJD TOTAAL", fmtDur(weekStats.total)],
+              ["DINNERS", `${selected.length} / ${MAX_DINNERS}`],
+              ["TOTAL COOK TIME", fmtDur(weekStats.total)],
               ["HANDS-ON", fmtDur(weekStats.active)],
-              ["BOODSCHAPPEN", `${shoppingList.length} items`],
+              ["GROCERIES", `${shoppingList.length} items`],
             ].map(([l, v]) => (
               <div key={l} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${LINE}` }}>
                 <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.16em", color: INK_SOFT }}>{l}</span>
@@ -1089,8 +1102,8 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
             ))}
             <div style={{ marginTop: 10 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.16em", color: INK_SOFT }}>EIWITBALANS</span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: INK_SOFT }}>{selected.length} {selected.length === 1 ? "avond" : "avonden"}</span>
+                <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.16em", color: INK_SOFT }}>PROTEIN BALANCE</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: INK_SOFT }}>{selected.length} {selected.length === 1 ? "evening" : "evenings"}</span>
               </div>
               <div style={{ display: "flex", height: 9, borderRadius: R_PILL, overflow: "hidden", background: "#F3E6D6", marginTop: 8 }}>
                 {["meat", "chicken", "fish", "veg"].map(k => weekStats.cats[k] > 0 && (
@@ -1110,47 +1123,47 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     );
   }
 
-  // receptenbibliotheek — big tap rows + de bewaarde filters
+  // recipe library — big tap rows + the kept filters
   function renderLibrary() {
     return (
         <section ref={libRef} style={{ scrollMarginTop: 12 }}>
-          <SecTag k="皿" label="Bibliotheek" right={loaded ? `${shown.length} RECEPTEN` : "LADEN…"} />
+          <SecTag k="皿" label="Library" right={loaded ? `${shown.length} RECIPES` : "LOADING…"} />
           <p style={{ fontSize: 13, color: G_MUTED, margin: "0 0 12px", lineHeight: 1.6 }}>
-            Kies tot {MAX_DINNERS} diners voor je week (hetzelfde gerecht mag meerdere dagen). 🍱
+            Pick up to {MAX_DINNERS} dinners for your week (the same dish may fill several days). 🍱
           </p>
 
-          {/* add a recipe — link of foto; opens the shared add sheet */}
+          {/* add a recipe — link or photo; opens the shared add sheet */}
           <button className="kg-ich-btn" onClick={() => { setAddErr(null); setPhotoErr(null); setPhotoOk(null); setAddOpen(true); }}
             style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%",
               minHeight: 48, marginBottom: 12, background: "#fff", border: `2px dashed ${MATCHA}`,
               borderRadius: R_LG, color: MATCHA_DP, fontFamily: F_DISPLAY, fontSize: 14.5, fontWeight: 800,
               boxShadow: SHADOW_SOFT }}>
-            <span style={{ fontSize: 17, lineHeight: 1 }}>＋</span> Recept toevoegen · 🔗 of 📷
+            <span style={{ fontSize: 17, lineHeight: 1 }}>＋</span> Add a recipe · 🔗 or 📷
           </button>
 
-          {/* ── foto-inbox: gefotografeerde receptpagina's die nog wachten ──
-              Bewust één klein kaartje, geen eigen modus: het is een wachtrij, geen
-              werkplek. Ichikawa (een Claude Code sessie) zet ze later om. */}
+          {/* ── photo inbox: photographed recipe pages still waiting ──
+              Deliberately one small card, not its own mode: it is a queue, not a
+              workbench. Ichikawa (a Claude Code session) converts them later. */}
           {photoInbox.length > 0 && (
             <div className="kg-ich-card" style={{ background: CARD, borderRadius: R_LG, padding: "12px 12px 10px",
               marginBottom: 12, boxShadow: SHADOW_SOFT, border: `2px dashed ${BLUSH}` }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
                 <span aria-hidden="true" style={{ fontSize: 16, lineHeight: 1 }}>📷</span>
                 <span style={{ fontFamily: F_DISPLAY, fontSize: 14, fontWeight: 800, color: INK }}>
-                  {photoInbox.length} foto{photoInbox.length === 1 ? "" : "'s"} wacht{photoInbox.length === 1 ? "" : "en"} op verwerking
+                  {photoInbox.length} photo{photoInbox.length === 1 ? "" : "s"} waiting to be processed
                 </span>
               </div>
-              <div className="kg-ich-chiprow" role="list" aria-label="foto's in de wachtrij"
+              <div className="kg-ich-chiprow" role="list" aria-label="photos in the queue"
                 style={{ alignItems: "flex-start" }}>
                 {photoInbox.map(p => (
                   <div key={p.id} role="listitem" style={{ position: "relative", width: 84, flexShrink: 0 }}>
                     <div style={{ position: "relative", width: 84, height: 84, borderRadius: R_MD, overflow: "hidden",
                       background: `linear-gradient(150deg, ${RICE2}, ${BLUSH})`, boxShadow: SHADOW_SOFT }}>
-                      <img src={`/api/recipes/photo/${encodeURIComponent(p.id)}/image`} alt={p.note || "gefotografeerd recept"}
+                      <img src={`/api/recipes/photo/${encodeURIComponent(p.id)}/image`} alt={p.note || "photographed recipe"}
                         loading="lazy" onError={e => { e.currentTarget.style.display = "none"; }}
                         style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
                       <button className="kg-ich-btn" onClick={() => handleDeletePhoto(p.id)}
-                        aria-label={`foto verwijderen${p.note ? ` (${p.note})` : ""}`}
+                        aria-label={`delete photo${p.note ? ` (${p.note})` : ""}`}
                         style={{ position: "absolute", top: 4, right: 4, width: 24, height: 24, borderRadius: "50%",
                           border: "none", background: "rgba(255,255,255,.9)", color: AZUKI, fontSize: 12,
                           fontWeight: 800, lineHeight: 1, padding: 0 }}>✕</button>
@@ -1173,9 +1186,9 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
               transform: "translateY(-50%)", fontSize: 15, pointerEvents: "none" }}>🔍</span>
             <input type="text" className="kg-ich-search-input" ref={searchRef} value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Zoek op naam, ingrediënt of tag…" />
+              placeholder="Search by name, ingredient or tag…" />
             {search && (
-              <button className="kg-ich-btn" onClick={() => setSearch("")} aria-label="zoekopdracht wissen"
+              <button className="kg-ich-btn" onClick={() => setSearch("")} aria-label="clear search"
                 style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
                   width: 34, height: 34, borderRadius: "50%", border: "none", background: "transparent",
                   color: INK_SOFT, fontSize: 15, lineHeight: 1 }}>
@@ -1184,8 +1197,8 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
             )}
           </div>
 
-          {/* soort (main-ingredient) chips */}
-          <div className="kg-ich-chiprow" role="group" aria-label="filter op soort">
+          {/* kind (main-ingredient) chips */}
+          <div className="kg-ich-chiprow" role="group" aria-label="filter by kind">
             {CATEGORY_FILTERS.map(c => {
               const on = cat === c.key;
               return (
@@ -1200,8 +1213,8 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
             })}
           </div>
 
-          {/* tijd chips */}
-          <div className="kg-ich-chiprow" role="group" aria-label="filter op bereidingstijd">
+          {/* time chips */}
+          <div className="kg-ich-chiprow" role="group" aria-label="filter by cooking time">
             <span style={{ fontSize: 12.5, fontWeight: 800, color: G_MUTED, alignSelf: "center", flexShrink: 0 }}>⏱</span>
             {TIME_BUCKETS.map(b => {
               const on = timeMax === b.max;
@@ -1219,7 +1232,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
 
           {/* tag chips */}
           {tags.length > 1 && (
-            <div className="kg-ich-chiprow" role="group" aria-label="filter op tag" style={{ marginBottom: 10 }}>
+            <div className="kg-ich-chiprow" role="group" aria-label="filter by tag" style={{ marginBottom: 10 }}>
               {tags.map(t => {
                 const on = tag === t;
                 return (
@@ -1228,7 +1241,8 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
                       color: on ? "#fff" : INK_SOFT, fontSize: 13.5, fontWeight: 800, padding: "9px 15px",
                       whiteSpace: "nowrap", flexShrink: 0,
                       boxShadow: on ? "0 6px 14px rgba(242,109,139,.30)" : SHADOW_SOFT }}>
-                    {t === "all" ? "Alle" : t}
+                    {/* tag values are recipe data — only the "all" chip is chrome */}
+                    {t === "all" ? "All" : t}
                   </button>
                 );
               })}
@@ -1239,7 +1253,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
           {loaded && shown.length === 0 && (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "48px 0", color: G_MUTED }}>
               <Mascot type="onigiri" size={72} bob={false} />
-              <span style={{ fontSize: 15, fontWeight: 700 }}>Geen recepten gevonden 🍙</span>
+              <span style={{ fontSize: 15, fontWeight: 700 }}>No recipes found 🍙</span>
             </div>
           )}
 
@@ -1287,13 +1301,13 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
                       <div style={{ display: "flex", alignItems: "center", gap: 5, background: SAKURA,
                         borderRadius: R_PILL, padding: "4px 6px", boxShadow: SHADOW_SOFT }}>
                         <button className="kg-ich-btn" onClick={() => removeOneOf(r.id)}
-                          title="Eén dag minder" aria-label={`Eén "${r.title}" uit bento`}
+                          title="One day fewer" aria-label={`Remove one "${r.title}" from the bento`}
                           style={{ width: 30, height: 30, borderRadius: "50%", border: "none", background: "rgba(255,255,255,.9)",
                             color: AZUKI, fontSize: 18, fontWeight: 800, lineHeight: 1, cursor: "pointer" }}>–</button>
                         <span style={{ minWidth: "1.2ch", textAlign: "center", color: "#fff", fontSize: 14, fontWeight: 800,
                           fontVariantNumeric: "tabular-nums" }}>{count}</span>
                         <button className="kg-ich-btn" onClick={() => addToPlan(r.id)} disabled={full}
-                          title={full ? `Max ${MAX_DINNERS} diners` : "Nog een dag"} aria-label={`Nog een "${r.title}" in bento`}
+                          title={full ? `Max ${MAX_DINNERS} dinners` : "One more day"} aria-label={`Add another "${r.title}" to the bento`}
                           style={{ width: 30, height: 30, borderRadius: "50%", border: "none",
                             background: full ? "rgba(255,255,255,.5)" : "rgba(255,255,255,.9)",
                             color: full ? "#D8907F" : SAKURA_DP, fontSize: 18, fontWeight: 800, lineHeight: 1,
@@ -1301,7 +1315,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
                       </div>
                     ) : (
                       <button className="kg-ich-btn" onClick={() => addToPlan(r.id)} disabled={full}
-                        title={full ? `Max ${MAX_DINNERS} diners` : "In m'n bento"} aria-label={`"${r.title}" in m'n bento`}
+                        title={full ? `Max ${MAX_DINNERS} dinners` : "Into my bento"} aria-label={`Add "${r.title}" to my bento`}
                         style={{ width: 44, height: 44, borderRadius: "50%",
                           border: "none", background: "#fff",
                           color: full ? "#D8C4B0" : SAKURA_DP, fontSize: 22, lineHeight: 1, fontWeight: 800,
@@ -1310,7 +1324,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
                       </button>
                     )}
                     <button className="kg-ich-btn" onClick={() => handleRemove(r)}
-                      title="Uit de bibliotheek" aria-label={`"${r.title}" verwijderen uit de bibliotheek`}
+                      title="Remove from the library" aria-label={`Remove "${r.title}" from the library`}
                       style={{ width: 24, height: 24, borderRadius: "50%", border: "none",
                         background: "#FFE9EC", color: AZUKI, fontSize: 12, fontWeight: 800, lineHeight: 1,
                         opacity: 0.65, boxShadow: "0 2px 5px rgba(214,91,120,.2)" }}>×</button>
@@ -1323,7 +1337,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     );
   }
 
-  // The phone PLAN page — pure week-builder now (the library moved to its own 皿 tab).
+  // The phone PLAN page — pure week builder now (the library moved to its own 皿 tab).
   function renderPlan() {
     return (
       <div style={PANE}>
@@ -1341,27 +1355,27 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     const total = shoppingList.length;
     return (
       <div style={PANE}>
-        <SecTag k="買" label="Boodschappen" right={total ? `${checkedCount} / ${total} BINNEN` : "JUMBO GENT"} />
+        <SecTag k="買" label="Groceries" right={total ? `${checkedCount} / ${total} IN THE CART` : "JUMBO GENT"} />
         {!loaded ? loadingCard : total === 0 ? (
           <div style={{ background: CARD, borderRadius: R_LG, padding: "36px 20px", boxShadow: SHADOW_SOFT,
             display: "flex", flexDirection: "column", alignItems: "center", gap: 12, textAlign: "center", color: INK_SOFT }}>
             <Mascot type="cat" size={72} />
             <span style={{ fontSize: 14.5, fontWeight: 700, lineHeight: 1.6, maxWidth: "34ch" }}>
-              Je lijst is nog leeg. Vul eerst het weekmenu, dan sorteert de scout je boodschappen per gang. 🐾
+              Your list is still empty. Fill the week menu first and the scout will sort your groceries aisle by aisle. 🐾
             </span>
             <button className="kg-ich-btn" onClick={goPlanLibrary}
               style={{ background: SAKURA, border: "none", borderRadius: R_PILL, color: "#fff",
                 fontSize: 14.5, fontWeight: 800, minHeight: 48, padding: "12px 22px", boxShadow: SHADOW_SOFT }}>
-              献 Naar je weekplan
+              献 To your week plan
             </button>
           </div>
         ) : (
           <>
             {/* paw-print trail — the scout's route; a done aisle earns a stamp */}
             <section style={{ background: CARD, borderRadius: R_LG, padding: "14px 12px 10px", boxShadow: SHADOW_SOFT }}>
-              <div className="kg-ich-trail" role="list" aria-label="Looproute door de winkel">
+              <div className="kg-ich-trail" role="list" aria-label="Walking route through the store">
                 <span role="listitem" style={{ flexShrink: 0, fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", color: INK_SOFT,
-                  border: `2px dashed ${LINE}`, borderRadius: R_PILL, padding: "6px 11px", whiteSpace: "nowrap" }}>🚪 INGANG</span>
+                  border: `2px dashed ${LINE}`, borderRadius: R_PILL, padding: "6px 11px", whiteSpace: "nowrap" }}>🚪 ENTRANCE</span>
                 {route.stops.map((s, i) => {
                   const done = s.items.every(it => aisleChecked.has(keyOf(it)));
                   return (
@@ -1386,17 +1400,17 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
                   color: allDone ? "#fff" : INK_SOFT, background: allDone ? SAKURA : "transparent",
                   border: allDone ? "2px solid transparent" : `2px dashed ${LINE}`,
                   borderRadius: R_PILL, padding: "6px 11px" }}>
-                  🛒 KASSA{allDone ? " 🎉" : ""}
+                  🛒 CHECKOUT{allDone ? " 🎉" : ""}
                 </span>
               </div>
               <p style={{ fontSize: 12, color: INK_SOFT, margin: "8px 4px 4px", lineHeight: 1.55 }}>
-                Gesorteerd op looprichting: vers eerst, diepvries als laatste. Eén rondje, geen teruglopen.
+                Sorted by walking direction: fresh first, frozen last. One lap, no backtracking.
               </p>
               <button className="kg-ich-btn" onClick={() => setShowRoute(true)}
                 style={{ width: "100%", marginTop: 6, background: `linear-gradient(150deg, ${SAKURA}, ${AZUKI})`,
                   color: "#fff", border: "none", borderRadius: R_PILL, fontSize: 14.5, fontWeight: 800,
                   minHeight: 48, padding: "12px 20px", boxShadow: "0 8px 18px rgba(214,91,120,.34)" }}>
-                🗺️ Bekijk plattegrond · Jumbo Gent
+                🗺️ View floorplan · Jumbo Gent
               </button>
             </section>
 
@@ -1443,18 +1457,18 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
                 marginTop: 14, paddingTop: 12, borderTop: `1px solid ${LINE}` }}>
                 <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.18em", color: INK_SOFT }}>
-                  WEEKLIJST · {servings}P · JUMBO GENT
+                  WEEK LIST · {servings}P · JUMBO GENT
                 </span>
                 <span style={{ fontSize: 14, fontWeight: 800, color: INK, fontVariantNumeric: "tabular-nums" }}>{checkedCount} / {total}</span>
               </div>
               <p style={{ fontSize: 12, color: INK_SOFT, margin: "8px 0 4px", lineHeight: 1.55 }}>
-                Samengevoegd per ingrediënt (eenheid-bewust), geschaald naar {servings} porties. Vinkjes blijven bewaard — ook na een herlaad in de gang.
+                Merged per ingredient (unit-aware), scaled to {servings} servings. Ticks are kept — even after a reload in the aisle.
               </p>
               {checkedCount > 0 && (
                 <button className="kg-ich-btn" onClick={() => setAisleChecked(new Set())}
                   style={{ width: "100%", marginTop: 6, background: "#fff", border: `2px solid ${LINE}`, borderRadius: R_PILL,
                     color: INK_SOFT, fontSize: 13.5, fontWeight: 800, minHeight: 44, padding: "10px 18px" }}>
-                  🐾 Nieuwe ronde — vinkjes wissen
+                  🐾 New round — clear ticks
                 </button>
               )}
             </section>
@@ -1464,8 +1478,8 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
                 display: "flex", alignItems: "center", gap: 14, animation: "ichPop .25s ease" }}>
                 <Mascot type="cat" size={58} />
                 <div>
-                  <div style={{ fontFamily: F_DISPLAY, fontSize: 16, fontWeight: 800, color: MATCHA_DP }}>Ronde klaar! 🎉</div>
-                  <div style={{ fontSize: 13, color: INK_SOFT, lineHeight: 1.55 }}>Alles binnen — de scout stempelt je kaart af en wandelt mee naar de kassa.</div>
+                  <div style={{ fontFamily: F_DISPLAY, fontSize: 16, fontWeight: 800, color: MATCHA_DP }}>Round complete! 🎉</div>
+                  <div style={{ fontSize: 13, color: INK_SOFT, lineHeight: 1.55 }}>Everything's in — the scout stamps your card and walks you to the checkout.</div>
                 </div>
                 <Paw size={26} color={SAKURA_DP} className="kg-ich-stamp" style={{ marginLeft: "auto", flexShrink: 0 }} />
               </div>
@@ -1476,23 +1490,23 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     );
   }
 
-  /* ═══════════════════ 火 KOOK — the stove job ═══════════════════ */
+  /* ═══════════════════ 火 COOK — the stove job ═══════════════════ */
   function renderKook() {
-    if (!loaded) return <div style={PANE}><SecTag k="火" label="Kookmodus" />{loadingCard}</div>;
+    if (!loaded) return <div style={PANE}><SecTag k="火" label="Cooking mode" />{loadingCard}</div>;
     if (!heroRecipe || !heroT) {
       return (
         <div style={PANE}>
-          <SecTag k="火" label="Kookmodus" />
+          <SecTag k="火" label="Cooking mode" />
           <div style={{ background: CARD, borderRadius: R_LG, padding: "36px 20px", boxShadow: SHADOW_SOFT,
             display: "flex", flexDirection: "column", alignItems: "center", gap: 12, textAlign: "center", color: INK_SOFT }}>
             <Mascot type="onigiri" size={72} />
             <span style={{ fontSize: 14.5, fontWeight: 700, lineHeight: 1.6, maxWidth: "34ch" }}>
-              Nog geen diner gepland. Kies eerst een gerecht, dan staat het recept hier voor je klaar.
+              No dinner planned yet. Pick a dish first and the recipe will be waiting for you here.
             </span>
             <button className="kg-ich-btn" onClick={goPlanLibrary}
               style={{ background: SAKURA, border: "none", borderRadius: R_PILL, color: "#fff",
                 fontSize: 14.5, fontWeight: 800, minHeight: 48, padding: "12px 22px", boxShadow: SHADOW_SOFT }}>
-              献 Naar je weekplan
+              献 To your week plan
             </button>
           </div>
         </div>
@@ -1508,7 +1522,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
             {cuisineOf(heroRecipe.cuisine).emoji}
           </span>
           <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: "0.26em", textTransform: "uppercase", color: SAKURA_DP, marginBottom: 8 }}>
-            今夜 · {hIdx === todayIdx ? "Wat eten we vanavond" : "Gepland"} · {DAY_FULL[hIdx]} {fmtD(weekDays[hIdx])}
+            今夜 · {hIdx === todayIdx ? "What's for dinner tonight" : "Planned"} · {DAY_FULL[hIdx]} {fmtD(weekDays[hIdx])}
           </div>
           <h2 className="kg-ich-title" onClick={() => setDetail(heroRecipe)}
             style={{ fontFamily: F_DISPLAY, fontSize: 22, fontWeight: 800, color: INK, lineHeight: 1.25, margin: "0 0 6px" }}>
@@ -1520,10 +1534,10 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
           {/* facts row */}
           <div style={{ display: "flex", gap: 22, flexWrap: "wrap", marginBottom: 16 }}>
             {[
-              [`${heroT.total}′`, "TOTAAL"],
+              [`${heroT.total}′`, "TOTAL"],
               [`${heroT.active}′`, "HANDS-ON"],
-              [String(servings), "PORTIES"],
-              [String((heroRecipe.ingredients || []).length), "INGREDIËNTEN"],
+              [String(servings), "SERVINGS"],
+              [String((heroRecipe.ingredients || []).length), "INGREDIENTS"],
             ].map(([v, l]) => (
               <div key={l}>
                 <div style={{ fontFamily: F_DISPLAY, fontSize: 21, fontWeight: 800, color: INK, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{v}</div>
@@ -1531,8 +1545,8 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
               </div>
             ))}
           </div>
-          {/* actief vs wachten split bar */}
-          <div role="img" aria-label={`${heroT.active} minuten actief, ${heroT.passive} minuten wachten`}
+          {/* active vs waiting split bar */}
+          <div role="img" aria-label={`${heroT.active} minutes active, ${heroT.passive} minutes waiting`}
             style={{ display: "flex", gap: 3, height: 12, borderRadius: R_PILL, overflow: "hidden" }}>
             <span style={{ flex: heroT.active || 1, background: SAKURA }} />
             {heroT.passive > 0 && <span style={{ flex: heroT.passive, background: RAMUNE }} />}
@@ -1540,11 +1554,11 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
           <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 11.5, fontWeight: 800, letterSpacing: "0.1em" }}>
             <span style={{ color: SAKURA_DP }}>
               <span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 3, background: SAKURA, marginRight: 6, verticalAlign: "-1px" }} />
-              ACTIEF {heroT.active}′
+              ACTIVE {heroT.active}′
             </span>
             <span style={{ color: RAMUNE_DP }}>
               <span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 3, background: RAMUNE, marginRight: 6, verticalAlign: "-1px" }} />
-              WACHTEN {heroT.passive}′
+              WAITING {heroT.passive}′
             </span>
           </div>
           {heroT.tip && (
@@ -1556,13 +1570,13 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
             <button className="kg-ich-btn" onClick={() => setDetail(heroRecipe)}
               style={{ background: SAKURA, border: "none", borderRadius: R_PILL, color: "#fff",
                 fontSize: 14, fontWeight: 800, minHeight: 44, padding: "10px 18px", boxShadow: SHADOW_SOFT }}>
-              ▸ Receptkaart
+              ▸ Recipe card
             </button>
             {selected.length > 1 && (
               <button className="kg-ich-btn" onClick={() => setHeroIdx((hIdx + 1) % selected.length)}
                 style={{ background: "#fff", border: `2px solid ${LINE}`, borderRadius: R_PILL,
                   color: INK_SOFT, fontSize: 14, fontWeight: 800, minHeight: 44, padding: "9px 16px" }}>
-                Recept wisselen
+                Switch recipe
               </button>
             )}
           </div>
@@ -1570,7 +1584,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
 
         {/* mise en place — scaled ingredients */}
         <section style={{ background: CARD, borderRadius: R_LG, padding: "16px 18px", boxShadow: SHADOW_SOFT }}>
-          <SecTag onCard k="皿" label="Mise en place" right={`${servings} PORTIES`} />
+          <SecTag onCard k="皿" label="Mise en place" right={`${servings} SERVINGS`} />
           {(heroRecipe.ingredients || []).map((ing, i) => (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10,
               minHeight: 42, padding: "3px 0", borderBottom: `1px solid ${LINE}`, fontSize: 14 }}>
@@ -1584,7 +1598,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
 
         {/* per-phase step timeline */}
         <section style={{ background: CARD, borderRadius: R_LG, padding: "16px 18px", boxShadow: SHADOW_SOFT }}>
-          <SecTag onCard k="火" label="Bereiding" right={`${heroT.steps.length} STAPPEN`} />
+          <SecTag onCard k="火" label="Method" right={`${heroT.steps.length} STEPS`} />
           <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {heroT.steps.map((s, i) => {
               const passive = s.mode === "passive";
@@ -1598,7 +1612,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
                     <span style={{ flex: "0 0 auto", fontSize: 11.5, fontWeight: 800, padding: "4px 10px", borderRadius: R_PILL,
                       whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", letterSpacing: "0.06em",
                       background: passive ? "#E4F3F5" : "#FFE3EA", color: passive ? RAMUNE_DP : SAKURA_DP }}>
-                      {passive ? "WACHT" : "ACTIEF"} {s.minutes}′
+                      {passive ? "WAIT" : "ACTIVE"} {s.minutes}′
                     </span>
                   )}
                 </li>
@@ -1606,7 +1620,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
             })}
           </ol>
           <p style={{ fontSize: 12.5, color: INK_SOFT, margin: "10px 0 0", lineHeight: 1.6 }}>
-            <b style={{ color: INK }}>Roze = handen bezig, blauw = je bent vrij.</b>
+            <b style={{ color: INK }}>Pink = hands busy, blue = you're free.</b>
           </p>
         </section>
       </div>
@@ -1618,7 +1632,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   const navBadge = {
     plan: selected.length ? `${selected.length}/${MAX_DINNERS}` : "",
     lib: loaded ? String(recipes.length) : "",
-    shop: shoppingList.length ? (shopLeft > 0 ? `${shopLeft} te gaan` : "✓ klaar") : "",
+    shop: shoppingList.length ? (shopLeft > 0 ? `${shopLeft} to go` : "✓ done") : "",
     cook: heroT ? `${heroT.total}′` : "",
   };
 
@@ -1736,7 +1750,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
             </span>
           </div>
           <span className="kg-ich-clamp1" style={{ fontSize: 11, color: INK_SOFT, fontWeight: 600 }}>
-            Market Scout · {loaded ? `${recipes.length} recepten` : "laden…"}
+            Market Scout · {loaded ? `${recipes.length} recipes` : "loading…"}
           </span>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
@@ -1745,7 +1759,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
           </span>
           <Mascot type="panda" size={38} />
           {onExit && (
-            <button className="kg-ich-btn" onClick={onExit} aria-label="terug naar Kage-gumi" title="Terug naar Kage-gumi"
+            <button className="kg-ich-btn" onClick={onExit} aria-label="back to Kage-gumi" title="Back to Kage-gumi"
               style={{ width: 38, height: 38, borderRadius: "50%", background: "#fff", border: "none",
                 color: MATCHA_DP, fontSize: 17, fontWeight: 800, lineHeight: 1, boxShadow: SHADOW_SOFT }}>
               ←
@@ -1755,7 +1769,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
       </header>
 
       {wide ? (
-        /* ── the management desk — plan · bibliotheek · shop/kook side panel ── */
+        /* ── the management desk — plan · library · shop/cook side panel ── */
         <div className="kg-ich-desk">
           {/* 献 plan column — build the week */}
           <div className="kg-ich-desk-col">
@@ -1767,22 +1781,22 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
               {renderWeekStats()}
             </div>
           </div>
-          {/* 皿 bibliotheek column — curate the library */}
+          {/* 皿 library column — curate the library */}
           <div className="kg-ich-desk-col">
             <div style={{ ...DESK_PANE, maxWidth: 760, margin: "0 auto", width: "100%" }}>
               {renderLibrary()}
             </div>
           </div>
           {/* 買/火 side panel — the execution jobs, previewed one at a time */}
-          <aside className="kg-ich-desk-col" aria-label="Shop en kook paneel">
+          <aside className="kg-ich-desk-col" aria-label="Shop and cook panel">
             <div style={{ position: "sticky", top: 0, zIndex: 3, display: "flex", gap: 8,
               padding: "12px 16px 10px", background: G_BG, borderBottom: `1px solid ${G_LINE}` }}>
               {[{ id: "shop", k: "買", label: "Shop", key: "S", badge: navBadge.shop },
-                { id: "cook", k: "火", label: "Kook", key: "K", badge: navBadge.cook }].map(t => {
+                { id: "cook", k: "火", label: "Cook", key: "K", badge: navBadge.cook }].map(t => {
                 const on = deskSide === t.id;
                 return (
                   <button key={t.id} className="kg-ich-btn" onClick={() => setDeskSide(t.id)} aria-pressed={on}
-                    title={`${t.label} — toets ${t.key}`}
+                    title={`${t.label} — key ${t.key}`}
                     style={{ flex: 1, minHeight: 42, borderRadius: R_PILL, border: "none",
                       background: on ? SAKURA : CARD, color: on ? "#fff" : INK_SOFT,
                       fontSize: 12.5, fontWeight: 800, letterSpacing: "0.08em", whiteSpace: "nowrap",
@@ -1849,7 +1863,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
         </div>
       )}
 
-      {/* ── add-a-recipe sheet — link of foto ── */}
+      {/* ── add-a-recipe sheet — link or photo ── */}
       {addOpen && <AddRecipeSheet url={addUrl} setUrl={setAddUrl} busy={addBusy} err={addErr}
         onSubmit={handleAddFromUrl}
         photoBusy={photoBusy} photoErr={photoErr} photoOk={photoOk} onSubmitPhoto={handleAddPhoto}
@@ -1869,7 +1883,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
 }
 
 // Pure: the totals implied by the step rows. total = every step's minutes,
-// active = only the hands-on (✋ actief) ones. Blank minutes count as 0.
+// active = only the hands-on (✋ active) ones. Blank minutes count as 0.
 const computeTimes = steps => {
   const mins = steps.map(s => {
     const n = s.minutes === "" ? 0 : Number(s.minutes);
@@ -1881,9 +1895,9 @@ const computeTimes = steps => {
   };
 };
 
-// Re-derive the tijden after a step change — unless the user hand-edited them.
+// Re-derive the times after a step change — unless the user hand-edited them.
 // Wraps the RETURNED form of every step-mutating helper, so editing a step keeps
-// the totals in sync; `timesManual` (set by typing in a tijd field) freezes them.
+// the totals in sync; `timesManual` (set by typing in a time field) freezes them.
 const withTimes = f => {
   if (f.timesManual) return f;
   const { total, active } = computeTimes(f.steps);
@@ -1894,9 +1908,9 @@ const withTimes = f => {
 // position:absolute child of the root (NOT fixed) so it works identically in
 // the desktop takeover and inside MobileShell's visualViewport-sized area.
 function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, onClose, onSaveIngredients, onSaveRecipe }) {
-  // Full recipe editing — one unified edit mode covering title/tags/porties/tijden/
-  // stappen/ingrediënten. `form` holds every editable field as controlled strings
-  // (quantities/minuten are BASE amounts per r.servings); null means "not editing".
+  // Full recipe editing — one unified edit mode covering title/tags/servings/times/
+  // steps/ingredients. `form` holds every editable field as controlled strings
+  // (quantities/minutes are BASE amounts per r.servings); null means "not editing".
   // Save persists the whole patch via the parent onSaveRecipe callback.
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -1932,15 +1946,15 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
         text: s.text || "", minutes: s.minutes == null ? "" : String(s.minutes),
         mode: s.mode === "passive" ? "passive" : "active",
       })),
-      // false = tijden auto-volgen de stappen. Opening the editor never recomputes
+      // false = times auto-follow the steps. Opening the editor never recomputes
       // (that would silently rewrite the stored number before a single edit) — only
       // an actual step mutation does.
       timesManual: false,
     });
   };
   const cancelEdit = () => { setForm(null); setEditErr(""); };
-  // Typing in either tijd field is a manual override — from then on step edits
-  // leave the tijden alone (until the herbereken-knop puts them back on auto).
+  // Typing in either time field is a manual override — from then on step edits
+  // leave the times alone (until the recalculate button puts them back on auto).
   const setField = (k, val) => setForm(f => (
     (k === "totalTime" || k === "activeTime")
       ? { ...f, [k]: val, timesManual: true }
@@ -1950,8 +1964,8 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
   const setIng    = (i, field, val) => setForm(f => ({ ...f, ingredients: f.ingredients.map((row, k) => (k === i ? { ...row, [field]: val } : row)) }));
   const removeIng = i => setForm(f => ({ ...f, ingredients: f.ingredients.filter((_, k) => k !== i) }));
   const addIng    = () => setForm(f => ({ ...f, ingredients: [...f.ingredients, { name: "", qty: "", unit: "" }] }));
-  // step rows — every mutation runs through withTimes(), so the tijden follow the
-  // stappen live (unless the user hand-edited them, see setField).
+  // step rows — every mutation runs through withTimes(), so the times follow the
+  // steps live (unless the user hand-edited them, see setField).
   const setStep    = (i, field, val) => setForm(f => withTimes({ ...f, steps: f.steps.map((row, k) => (k === i ? { ...row, [field]: val } : row)) }));
   const removeStep = i => setForm(f => withTimes({ ...f, steps: f.steps.filter((_, k) => k !== i) }));
   const addStep    = () => setForm(f => withTimes({ ...f, steps: [...f.steps, { text: "", minutes: "", mode: "active" }] }));
@@ -1962,8 +1976,8 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
     const s = f.steps.slice(); [s[i], s[j]] = [s[j], s[i]];
     return withTimes({ ...f, steps: s });
   });
-  // Force a re-sync: recompute both tijden from the step rows AND drop the manual
-  // override, so the tijden auto-follow the stappen again from here on.
+  // Force a re-sync: recompute both times from the step rows AND drop the manual
+  // override, so the times auto-follow the steps again from here on.
   const recalcTimes = () => setForm(f => withTimes({ ...f, timesManual: false }));
   const saveEdit = async () => {
     const num = v => {
@@ -1997,7 +2011,7 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
       await onSaveRecipe(r.id, patch);
       setForm(null);
     } catch {
-      setEditErr("Opslaan mislukt — probeer opnieuw.");
+      setEditErr("Saving failed — please try again.");
     } finally {
       setSaving(false);
     }
@@ -2026,7 +2040,7 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
         {/* sheet header — pastel food banner + drag handle */}
         <div style={{ position: "relative", padding: "10px 20px 16px", background: `linear-gradient(150deg, ${cz.a}, ${cz.b})` }}>
           <div aria-hidden="true" className="kg-ich-grab" style={{ width: 44, height: 5, borderRadius: 3, background: "rgba(91,71,80,.28)", margin: "0 auto 10px" }} />
-          <button className="kg-ich-btn" onClick={onClose} aria-label="sluiten"
+          <button className="kg-ich-btn" onClick={onClose} aria-label="close"
             style={{ position: "absolute", top: 14, right: 14, width: 36, height: 36, borderRadius: "50%",
               background: "rgba(255,255,255,.85)", border: "none", color: INK, fontSize: 16, lineHeight: 1,
               fontWeight: 800, boxShadow: SHADOW_SOFT }}>✕</button>
@@ -2039,7 +2053,7 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
           </div>
           <div style={{ display: "flex", gap: 7, marginTop: 12, flexWrap: "wrap" }}>
             {r.cuisine && <span style={{ fontSize: 12.5, fontWeight: 800, color: SAKURA_DP, background: "rgba(255,255,255,.7)", borderRadius: R_PILL, padding: "3px 11px" }}>{r.cuisine}</span>}
-            <span style={{ fontSize: 12.5, fontWeight: 800, color: INK, background: "rgba(255,255,255,.7)", borderRadius: R_PILL, padding: "3px 11px" }}>👥 {servings} porties</span>
+            <span style={{ fontSize: 12.5, fontWeight: 800, color: INK, background: "rgba(255,255,255,.7)", borderRadius: R_PILL, padding: "3px 11px" }}>👥 {servings} servings</span>
             {(r.tags || []).map(t2 => (
               <span key={t2} style={{ fontSize: 12.5, fontWeight: 700, color: INK_SOFT, background: "rgba(255,255,255,.55)", borderRadius: R_PILL, padding: "3px 11px" }}>{t2}</span>
             ))}
@@ -2054,25 +2068,25 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
           {/* ── COOKING MODE ── */}
           <div style={{ fontFamily: F_DISPLAY, fontSize: 15, fontWeight: 800, color: MATCHA_DP,
             display: "flex", alignItems: "center", gap: 8 }}>
-            🔥 Cooking mode <span style={{ fontFamily: F_ROUND, fontSize: 13, fontWeight: 600, color: INK_SOFT }}>: elke fase, elke minuut</span>
+            🔥 Cooking mode <span style={{ fontFamily: F_ROUND, fontSize: 13, fontWeight: 600, color: INK_SOFT }}>: every phase, every minute</span>
           </div>
 
           {/* total + split bar */}
           <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
             <div>
-              <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: INK_SOFT }}>Totale tijd</div>
+              <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: INK_SOFT }}>Total time</div>
               <div style={{ fontFamily: F_DISPLAY, fontSize: 34, fontWeight: 800, color: SAKURA_DP, lineHeight: 1 }}>
                 {t.total}<span style={{ fontFamily: F_ROUND, fontSize: 13, fontWeight: 600, color: INK_SOFT }}> min</span>
               </div>
             </div>
-            <div role="img" aria-label={`${t.active} minuten actief, ${t.passive} minuten wachten`}
+            <div role="img" aria-label={`${t.active} minutes active, ${t.passive} minutes waiting`}
               style={{ display: "flex", gap: 4, flex: 1, minWidth: 200, height: 40, borderRadius: R_PILL,
                 overflow: "hidden", boxShadow: SHADOW_SOFT }}>
               <div style={{ flex: activeFlex, background: SAKURA, display: "flex", alignItems: "center", justifyContent: "center",
-                color: "#fff", fontSize: 12.5, fontWeight: 800, whiteSpace: "nowrap" }}>{t.active}′ actief</div>
+                color: "#fff", fontSize: 12.5, fontWeight: 800, whiteSpace: "nowrap" }}>{t.active}′ active</div>
               {passiveFlex > 0 && (
                 <div style={{ flex: passiveFlex, background: RAMUNE, display: "flex", alignItems: "center", justifyContent: "center",
-                  color: "#2E6E77", fontSize: 12.5, fontWeight: 800, whiteSpace: "nowrap" }}>{t.passive}′ wachten</div>
+                  color: "#2E6E77", fontSize: 12.5, fontWeight: 800, whiteSpace: "nowrap" }}>{t.passive}′ waiting</div>
               )}
             </div>
           </div>
@@ -2099,7 +2113,7 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
                     <span style={{ flex: "0 0 auto", fontSize: 13, fontWeight: 800, padding: "5px 11px", borderRadius: R_PILL,
                       whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums",
                       background: passive ? "#E4F3F5" : "#FFE3EA", color: passive ? RAMUNE_DP : SAKURA_DP }}>
-                      {s.minutes}′{passive ? " wachten" : ""}
+                      {s.minutes}′{passive ? " waiting" : ""}
                     </span>
                   )}
                 </li>
@@ -2107,29 +2121,29 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
             })}
           </ol>
           <p style={{ fontSize: 13, color: INK_SOFT, margin: 0, lineHeight: 1.6 }}>
-            <b style={{ color: INK }}>Roze = handen bezig, blauw = je bent vrij.</b> Per-fase tijden zijn een schatting uit het recept, pas ze gerust aan.
+            <b style={{ color: INK }}>Pink = hands busy, blue = you're free.</b> Per-phase times are an estimate from the recipe — feel free to adjust them.
           </p>
           </>)}
 
-          {/* ── INGREDIËNTEN (read-only) heading + edit toggle ── */}
+          {/* ── INGREDIENTS (read-only) heading + edit toggle ── */}
           {!editing && (
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 2 }}>
-              <div style={{ fontFamily: F_DISPLAY, fontSize: 15, fontWeight: 800, color: MATCHA_DP }}>🧂 Ingrediënten</div>
-              <button className="kg-ich-btn" onClick={startEdit} aria-label="Recept bewerken"
+              <div style={{ fontFamily: F_DISPLAY, fontSize: 15, fontWeight: 800, color: MATCHA_DP }}>🧂 Ingredients</div>
+              <button className="kg-ich-btn" onClick={startEdit} aria-label="Edit recipe"
                 style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, background: "#FFF0F3", border: "none",
                   borderRadius: R_PILL, color: SAKURA_DP, fontSize: 12.5, fontWeight: 800, padding: "6px 13px",
                   boxShadow: SHADOW_SOFT, cursor: "pointer" }}>
-                ✏️ Bewerk recept
+                ✏️ Edit recipe
               </button>
             </div>
           )}
 
           {!editing ? (
-            /* read view — scaled to the porties setting */
+            /* read view — scaled to the servings setting */
             <div>
               {(r.ingredients || []).length === 0 && (
                 <div style={{ fontSize: 13.5, color: INK_SOFT, padding: "8px 0" }}>
-                  Nog geen ingrediënten — tik <b style={{ color: SAKURA_DP }}>Bewerk recept</b> om ze toe te voegen.
+                  No ingredients yet — tap <b style={{ color: SAKURA_DP }}>Edit recipe</b> to add them.
                 </div>
               )}
               {(r.ingredients || []).map((ing, i) => (
@@ -2143,96 +2157,99 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
               ))}
             </div>
           ) : (
-            /* ── FULL EDITOR — recept-velden + ingrediënten + stappen ── */
+            /* ── FULL EDITOR — recipe fields + ingredients + steps ── */
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {/* recept-velden */}
+              {/* recipe fields — labels are chrome (English); the VALUES you type are
+                  recipe content and stay in whatever language the recipe is in. The
+                  cuisine example stays Dutch on purpose: it is a lookup key into
+                  CUISINE, whose keys match the corpus' own values. */}
               <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
                 <div>
-                  <label style={fLabel}>Titel</label>
+                  <label style={fLabel}>Title</label>
                   <input value={form.title} onChange={e => setField("title", e.target.value)}
-                    placeholder="Recepttitel" aria-label="Titel" style={{ ...fInput, fontWeight: 800 }} />
+                    placeholder="Recipe title" aria-label="Title" style={{ ...fInput, fontWeight: 800 }} />
                 </div>
                 <div>
-                  <label style={fLabel}>Ondertitel</label>
+                  <label style={fLabel}>Subtitle</label>
                   <input value={form.subtitle} onChange={e => setField("subtitle", e.target.value)}
-                    placeholder="Korte omschrijving" aria-label="Ondertitel" style={fInput} />
+                    placeholder="Short description" aria-label="Subtitle" style={fInput} />
                 </div>
                 <div style={{ display: "flex", gap: 9 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <label style={fLabel}>Keuken</label>
+                    <label style={fLabel}>Cuisine</label>
                     <input value={form.cuisine} onChange={e => setField("cuisine", e.target.value)}
-                      placeholder="bv. Italiaans" aria-label="Keuken" style={fInput} />
+                      placeholder="e.g. Italiaans" aria-label="Cuisine" style={fInput} />
                   </div>
                   <div style={{ width: 92, flexShrink: 0 }}>
-                    <label style={fLabel}>Porties</label>
+                    <label style={fLabel}>Servings</label>
                     <input value={form.servings} onChange={e => setField("servings", e.target.value)}
-                      inputMode="numeric" placeholder="2" aria-label="Porties"
+                      inputMode="numeric" placeholder="2" aria-label="Servings"
                       style={{ ...fInput, textAlign: "center", fontWeight: 800, fontVariantNumeric: "tabular-nums" }} />
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 9 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <label style={fLabel}>Totale tijd (min)</label>
+                    <label style={fLabel}>Total time (min)</label>
                     <input value={form.totalTime} onChange={e => setField("totalTime", e.target.value)}
-                      inputMode="numeric" placeholder="30" aria-label="Totale tijd in minuten"
+                      inputMode="numeric" placeholder="30" aria-label="Total time in minutes"
                       style={{ ...fInput, textAlign: "center", fontVariantNumeric: "tabular-nums" }} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <label style={fLabel}>Hands-on (min)</label>
                     <input value={form.activeTime} onChange={e => setField("activeTime", e.target.value)}
-                      inputMode="numeric" placeholder="15" aria-label="Actieve tijd in minuten"
+                      inputMode="numeric" placeholder="15" aria-label="Active time in minutes"
                       style={{ ...fInput, textAlign: "center", fontVariantNumeric: "tabular-nums" }} />
                   </div>
                 </div>
-                {/* herbereken — zet de tijden terug op automatisch en vult ze opnieuw uit de stappen */}
+                {/* recalculate — puts the times back on automatic and refills them from the steps */}
                 <div>
                   <button className="kg-ich-btn" onClick={recalcTimes}
-                    title="Herbereken de tijden opnieuw uit de stappen"
-                    aria-label="Herbereken de tijden opnieuw uit de stappen en laat ze weer automatisch volgen"
+                    title="Recalculate the times from the steps"
+                    aria-label="Recalculate the times from the steps and let them follow automatically again"
                     style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "transparent",
                       border: `2px dashed ${MATCHA}`, borderRadius: R_PILL, color: MATCHA_DP, fontSize: 13.5, fontWeight: 800,
                       padding: "8px 16px", cursor: "pointer" }}>
-                    ⏱ Herbereken uit stappen
+                    ⏱ Recalculate from steps
                   </button>
                   {form.steps.filter(s => s.minutes === "").length > 0 && (
                     <div style={{ fontSize: 12, color: INK_SOFT, fontWeight: 700, marginTop: 6 }}>
                       {form.steps.filter(s => s.minutes === "").length === 1
-                        ? "1 stap zonder minuten telt als 0"
-                        : `${form.steps.filter(s => s.minutes === "").length} stappen zonder minuten tellen als 0`}
+                        ? "1 step without minutes counts as 0"
+                        : `${form.steps.filter(s => s.minutes === "").length} steps without minutes count as 0`}
                     </div>
                   )}
                 </div>
                 <div>
-                  <label style={fLabel}>Tags (komma-gescheiden)</label>
+                  <label style={fLabel}>Tags (comma-separated)</label>
                   <input value={form.tags} onChange={e => setField("tags", e.target.value)}
                     placeholder="kip, oven, snel" aria-label="Tags" style={fInput} />
                 </div>
                 <div>
-                  <label style={fLabel}>Parallel-tip</label>
+                  <label style={fLabel}>Parallel tip</label>
                   <textarea value={form.parallelTip} onChange={e => setField("parallelTip", e.target.value)}
-                    placeholder="Wat kan tegelijk lopen?" aria-label="Parallel-tip" rows={2}
+                    placeholder="What can run at the same time?" aria-label="Parallel tip" rows={2}
                     style={{ ...fInput, resize: "vertical", lineHeight: 1.5 }} />
                 </div>
               </div>
 
-              {/* ingrediënten */}
+              {/* ingredients */}
               <div>
-                <div style={{ fontFamily: F_DISPLAY, fontSize: 14, fontWeight: 800, color: MATCHA_DP, marginBottom: 4 }}>🧂 Ingrediënten</div>
+                <div style={{ fontFamily: F_DISPLAY, fontSize: 14, fontWeight: 800, color: MATCHA_DP, marginBottom: 4 }}>🧂 Ingredients</div>
                 <div style={{ fontSize: 12, color: INK_SOFT, fontWeight: 700, marginBottom: 9 }}>
-                  Hoeveelheden per {form.servings || r.servings || servings} porties. In de boodschappenlijst worden ze naar je porties geschaald.
+                  Quantities per {form.servings || r.servings || servings} servings. The shopping list scales them to your servings.
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
                   {form.ingredients.map((row, i) => (
                     <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <input value={row.name} onChange={e => setIng(i, "name", e.target.value)} placeholder="ingrediënt"
-                        aria-label={`Naam ingrediënt ${i + 1}`} style={{ ...fInput, flex: 1, minWidth: 0 }} />
+                      <input value={row.name} onChange={e => setIng(i, "name", e.target.value)} placeholder="ingredient"
+                        aria-label={`Name of ingredient ${i + 1}`} style={{ ...fInput, flex: 1, minWidth: 0 }} />
                       <input value={row.qty} onChange={e => setIng(i, "qty", e.target.value)} placeholder="0" inputMode="decimal"
-                        aria-label={`Hoeveelheid ${i + 1}`}
+                        aria-label={`Quantity ${i + 1}`}
                         style={{ ...fInput, width: 58, flexShrink: 0, fontWeight: 800, color: SAKURA_DP, textAlign: "right", padding: "9px 8px", fontVariantNumeric: "tabular-nums" }} />
                       <input value={row.unit} onChange={e => setIng(i, "unit", e.target.value)} placeholder="g"
-                        aria-label={`Eenheid ${i + 1}`}
+                        aria-label={`Unit ${i + 1}`}
                         style={{ ...fInput, width: 62, flexShrink: 0, fontSize: 13, fontWeight: 700, padding: "9px 8px" }} />
-                      <button className="kg-ich-btn" onClick={() => removeIng(i)} aria-label={`Verwijder ${row.name || `ingrediënt ${i + 1}`}`}
+                      <button className="kg-ich-btn" onClick={() => removeIng(i)} aria-label={`Remove ${row.name || `ingredient ${i + 1}`}`}
                         style={{ flexShrink: 0, width: 32, height: 32, borderRadius: "50%", border: "none", background: "#FFE9EC",
                           color: AZUKI, fontSize: 15, fontWeight: 800, lineHeight: 1, cursor: "pointer" }}>×</button>
                     </div>
@@ -2242,15 +2259,15 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
                   style={{ marginTop: 9, alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 7, background: "transparent",
                     border: `2px dashed ${MATCHA}`, borderRadius: R_PILL, color: MATCHA_DP, fontSize: 13.5, fontWeight: 800,
                     padding: "8px 16px", cursor: "pointer" }}>
-                  ＋ Ingrediënt toevoegen
+                  ＋ Add ingredient
                 </button>
               </div>
 
-              {/* stappen */}
+              {/* steps */}
               <div>
-                <div style={{ fontFamily: F_DISPLAY, fontSize: 14, fontWeight: 800, color: MATCHA_DP, marginBottom: 4 }}>🔥 Stappen</div>
+                <div style={{ fontFamily: F_DISPLAY, fontSize: 14, fontWeight: 800, color: MATCHA_DP, marginBottom: 4 }}>🔥 Steps</div>
                 <div style={{ fontSize: 12, color: INK_SOFT, fontWeight: 700, marginBottom: 9 }}>
-                  Roze = handen bezig (actief), blauw = wachten (passief). Minuten sturen de tijdlijn.
+                  Pink = hands busy (active), blue = waiting (passive). Minutes drive the timeline.
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
                   {form.steps.map((row, i) => (
@@ -2259,25 +2276,25 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
                       <span style={{ flex: "0 0 auto", width: 24, height: 24, borderRadius: "50%", background: MATCHA,
                         color: "#fff", fontWeight: 800, fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center", marginTop: 2 }}>{i + 1}</span>
                       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-                        <textarea value={row.text} onChange={e => setStep(i, "text", e.target.value)} placeholder="Wat gebeurt er in deze stap?"
-                          aria-label={`Stap ${i + 1} tekst`} rows={2}
+                        <textarea value={row.text} onChange={e => setStep(i, "text", e.target.value)} placeholder="What happens in this step?"
+                          aria-label={`Step ${i + 1} text`} rows={2}
                           style={{ ...fInput, background: "#fff", resize: "vertical", lineHeight: 1.45 }} />
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                           <input value={row.minutes} onChange={e => setStep(i, "minutes", e.target.value)} placeholder="min" inputMode="numeric"
-                            aria-label={`Stap ${i + 1} minuten`}
+                            aria-label={`Step ${i + 1} minutes`}
                             style={{ ...fInput, background: "#fff", width: 62, flexShrink: 0, textAlign: "center", fontWeight: 800, fontVariantNumeric: "tabular-nums" }} />
                           <button className="kg-ich-btn" onClick={() => toggleStepMode(i)}
-                            aria-label={`Stap ${i + 1} is ${row.mode === "passive" ? "wachten" : "actief"} — wissel`}
+                            aria-label={`Step ${i + 1} is ${row.mode === "passive" ? "waiting" : "active"} — switch`}
                             style={{ border: "none", borderRadius: R_PILL, fontSize: 12, fontWeight: 800, padding: "7px 13px", cursor: "pointer",
                               background: row.mode === "passive" ? "#E4F3F5" : "#FFE3EA", color: row.mode === "passive" ? RAMUNE_DP : SAKURA_DP }}>
-                            {row.mode === "passive" ? "🕒 wachten" : "✋ actief"}
+                            {row.mode === "passive" ? "🕒 waiting" : "✋ active"}
                           </button>
                           <div style={{ marginLeft: "auto", display: "flex", gap: 5 }}>
                             <button className="kg-ich-btn" onClick={() => moveStep(i, -1)} disabled={i === 0}
-                              aria-label={`Stap ${i + 1} omhoog`} style={{ ...miniBtn, opacity: i === 0 ? 0.4 : 1 }}>↑</button>
+                              aria-label={`Move step ${i + 1} up`} style={{ ...miniBtn, opacity: i === 0 ? 0.4 : 1 }}>↑</button>
                             <button className="kg-ich-btn" onClick={() => moveStep(i, 1)} disabled={i === form.steps.length - 1}
-                              aria-label={`Stap ${i + 1} omlaag`} style={{ ...miniBtn, opacity: i === form.steps.length - 1 ? 0.4 : 1 }}>↓</button>
-                            <button className="kg-ich-btn" onClick={() => removeStep(i)} aria-label={`Verwijder stap ${i + 1}`}
+                              aria-label={`Move step ${i + 1} down`} style={{ ...miniBtn, opacity: i === form.steps.length - 1 ? 0.4 : 1 }}>↓</button>
+                            <button className="kg-ich-btn" onClick={() => removeStep(i)} aria-label={`Remove step ${i + 1}`}
                               style={{ ...miniBtn, background: "#FFE9EC", color: AZUKI }}>×</button>
                           </div>
                         </div>
@@ -2289,7 +2306,7 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
                   style={{ marginTop: 9, alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 7, background: "transparent",
                     border: `2px dashed ${MATCHA}`, borderRadius: R_PILL, color: MATCHA_DP, fontSize: 13.5, fontWeight: 800,
                     padding: "8px 16px", cursor: "pointer" }}>
-                  ＋ Stap toevoegen
+                  ＋ Add step
                 </button>
               </div>
 
@@ -2302,12 +2319,12 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
                   style={{ background: MATCHA, border: "none", borderRadius: R_PILL, color: "#fff", fontSize: 14, fontWeight: 800,
                     padding: "10px 22px", minHeight: 44, boxShadow: SHADOW_SOFT, cursor: saving ? "wait" : "pointer",
                     opacity: saving ? 0.7 : 1 }}>
-                  {saving ? "Bewaren…" : "Bewaar recept"}
+                  {saving ? "Saving…" : "Save recipe"}
                 </button>
                 <button className="kg-ich-btn" onClick={cancelEdit} disabled={saving}
                   style={{ background: "transparent", border: `1px solid ${LINE}`, borderRadius: R_PILL, color: INK_SOFT,
                     fontSize: 14, fontWeight: 800, padding: "10px 22px", minHeight: 44, cursor: "pointer" }}>
-                  Annuleer
+                  Cancel
                 </button>
               </div>
             </div>
@@ -2320,19 +2337,19 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
           alignItems: "center", justifyContent: inPlan ? "space-between" : "flex-end", gap: 12, background: "#FFFDFB" }}>
           {inPlan && (
             <span style={{ fontSize: 13.5, fontWeight: 700, color: INK_SOFT }}>
-              {count}× in je bento{count > 1 ? " · meerdere dagen 🍱" : ""}
+              {count}× in your bento{count > 1 ? " · several days 🍱" : ""}
             </span>
           )}
           {inPlan ? (
             <div style={{ display: "flex", alignItems: "center", gap: 10, background: SAKURA, borderRadius: R_PILL,
               padding: "6px 8px", boxShadow: SHADOW_SOFT }}>
-              <button className="kg-ich-btn" onClick={onRemoveOne} aria-label="één dag minder"
+              <button className="kg-ich-btn" onClick={onRemoveOne} aria-label="one day fewer"
                 style={{ width: 38, height: 38, borderRadius: "50%", border: "none", background: "rgba(255,255,255,.9)",
                   color: AZUKI, fontSize: 20, fontWeight: 800, lineHeight: 1, cursor: "pointer" }}>–</button>
               <span style={{ minWidth: "2.2ch", textAlign: "center", color: "#fff", fontSize: 15, fontWeight: 800,
                 fontVariantNumeric: "tabular-nums" }}>{count}</span>
               <button className="kg-ich-btn" onClick={onAdd} disabled={!canAdd}
-                title={canAdd ? "Nog een dag" : `Bento vol (${MAX_DINNERS})`} aria-label="nog een dag"
+                title={canAdd ? "One more day" : `Bento full (${MAX_DINNERS})`} aria-label="one more day"
                 style={{ width: 38, height: 38, borderRadius: "50%", border: "none",
                   background: canAdd ? "rgba(255,255,255,.9)" : "rgba(255,255,255,.5)",
                   color: canAdd ? SAKURA_DP : "#D8907F", fontSize: 20, fontWeight: 800, lineHeight: 1,
@@ -2344,7 +2361,7 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
                 color: canAdd ? "#fff" : "#C7A98F", fontSize: 15, fontWeight: 800, minHeight: 48,
                 padding: "12px 24px", boxShadow: canAdd ? SHADOW_SOFT : "none",
                 cursor: canAdd ? "pointer" : "not-allowed" }}>
-              {canAdd ? "In m'n bento +" : `Bento vol (${MAX_DINNERS})`}
+              {canAdd ? "Into my bento +" : `Bento full (${MAX_DINNERS})`}
             </button>
           )}
         </div>
@@ -2358,7 +2375,7 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
 // works in both mounts).
 //   🔗 URL   — the server pulls the page's schema.org JSON-LD into the corpus and
 //              hands the normalized recipe back, straight into the library.
-//   📷 FOTO  — a snapshot of a cookbook page is only STORED (foto-inbox). No AI
+//   📷 PHOTO — a snapshot of a cookbook page is only STORED (photo inbox). No AI
 //              runs here; Ichikawa turns the queue into recipes later. Nothing
 //              lands in the library yet, so the copy must not promise that.
 function AddRecipeSheet({ url, setUrl, busy, err, onSubmit, onClose,
@@ -2366,7 +2383,7 @@ function AddRecipeSheet({ url, setUrl, busy, err, onSubmit, onClose,
   const inputRef = useRef(null);
   const fileRef  = useRef(null);
   const [file, setFile] = useState(null);       // the chosen photo (File)
-  const [pNote, setPNote] = useState("");       // optional "kookboek p. 42"
+  const [pNote, setPNote] = useState("");       // optional "cookbook p. 42"
   useEffect(() => {
     const onKey = e => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -2388,32 +2405,32 @@ function AddRecipeSheet({ url, setUrl, busy, err, onSubmit, onClose,
   return (
     <div onClick={onClose} className="kg-ich-overlay" style={{ position: "absolute", inset: 0, zIndex: 86, background: "rgba(75,59,66,.42)",
       display: "flex", alignItems: "flex-end", justifyContent: "center", animation: "ichFade .18s ease" }}>
-      <div onClick={e => e.stopPropagation()} role="dialog" aria-label="Recept toevoegen" className="kg-ich-sheet"
+      <div onClick={e => e.stopPropagation()} role="dialog" aria-label="Add a recipe" className="kg-ich-sheet"
         style={{ width: "100%", maxWidth: 520, maxHeight: "92%", background: CARD,
           borderRadius: `${R_LG}px ${R_LG}px 0 0`, overflow: "hidden", display: "flex", flexDirection: "column",
           animation: "ichSheet .22s ease", boxShadow: "0 -18px 60px rgba(150,110,80,.38)", fontFamily: F_ROUND, color: INK }}>
         {/* header — matcha banner */}
         <div style={{ position: "relative", padding: "10px 20px 16px", background: `linear-gradient(150deg, ${MATCHA}, ${RAMUNE})`, color: "#fff" }}>
           <div aria-hidden="true" className="kg-ich-grab" style={{ width: 44, height: 5, borderRadius: 3, background: "rgba(255,255,255,.45)", margin: "0 auto 10px" }} />
-          <button className="kg-ich-btn" onClick={onClose} aria-label="sluiten"
+          <button className="kg-ich-btn" onClick={onClose} aria-label="close"
             style={{ position: "absolute", top: 14, right: 14, width: 36, height: 36, borderRadius: "50%",
               background: "rgba(255,255,255,.85)", border: "none", color: INK, fontSize: 16, lineHeight: 1, fontWeight: 800 }}>✕</button>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 30, filter: "drop-shadow(0 4px 8px rgba(60,110,80,.3))" }}>🍱</span>
             <div>
-              <h2 style={{ fontFamily: F_DISPLAY, fontSize: 18, fontWeight: 800, margin: 0, lineHeight: 1.2 }}>Recept toevoegen</h2>
-              <div style={{ fontSize: 12.5, opacity: .95, marginTop: 2, fontWeight: 600 }}>Plak een link — of fotografeer een receptpagina 📷</div>
+              <h2 style={{ fontFamily: F_DISPLAY, fontSize: 18, fontWeight: 800, margin: 0, lineHeight: 1.2 }}>Add a recipe</h2>
+              <div style={{ fontSize: 12.5, opacity: .95, marginTop: 2, fontWeight: 600 }}>Paste a link — or photograph a recipe page 📷</div>
             </div>
           </div>
         </div>
 
-        {/* body — scrolls, because it now carries two ways in (link + foto) */}
+        {/* body — scrolls, because it now carries two ways in (link + photo) */}
         <div style={{ overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
-        {/* ① het linkveld + versturen */}
+        {/* ① the link field + submit */}
         <form onSubmit={onSubmit} style={{ padding: "18px 20px 4px", display: "flex", flexDirection: "column", gap: 14 }}>
           <input ref={inputRef} type="url" inputMode="url" autoComplete="off" autoCapitalize="off" spellCheck={false}
             className="kg-ich-search-input" value={url} onChange={e => setUrl(e.target.value)}
-            placeholder="https://… (recept van eender welke site)" disabled={busy}
+            placeholder="https://… (a recipe from any site)" disabled={busy}
             style={{ padding: "12px 16px" }} />
           {err && (
             <div role="alert" style={{ background: "#FFECEF", color: AZUKI, fontSize: 13, fontWeight: 700,
@@ -2422,38 +2439,38 @@ function AddRecipeSheet({ url, setUrl, busy, err, onSubmit, onClose,
             </div>
           )}
           <p style={{ fontSize: 12.5, color: G_MUTED, margin: 0, lineHeight: 1.6 }}>
-            Werkt met de meeste receptensites (HelloFresh, Colruyt, Dagelijkse Kost…). Het gerecht landt meteen in je bibliotheek.
+            Works with most recipe sites (HelloFresh, Colruyt, Dagelijkse Kost…). The dish lands straight in your library.
           </p>
           <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 2 }}>
             <button type="button" className="kg-ich-btn" onClick={onClose} disabled={busy}
               style={{ background: "#fff", border: `2px solid ${LINE}`, borderRadius: R_PILL,
                 color: INK_SOFT, fontSize: 14, fontWeight: 800, minHeight: 48, padding: "11px 18px" }}>
-              Annuleer
+              Cancel
             </button>
             <button type="submit" className="kg-ich-btn" disabled={busy || !url.trim()}
               style={{ background: busy || !url.trim() ? "#CDE9D5" : MATCHA_DP, border: "none", borderRadius: R_PILL,
                 color: "#fff", fontSize: 14.5, fontWeight: 800, minHeight: 48, padding: "11px 22px",
                 boxShadow: busy || !url.trim() ? "none" : SHADOW_SOFT,
                 cursor: busy || !url.trim() ? "not-allowed" : "pointer" }}>
-              {busy ? "Ophalen…" : "Toevoegen +"}
+              {busy ? "Fetching…" : "Add +"}
             </button>
           </div>
         </form>
 
-        {/* ── "of" — de scheiding tussen de twee manieren ── */}
+        {/* ── "or" — the divide between the two ways in ── */}
         <div aria-hidden="true" style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 20px 4px" }}>
           <span style={{ flex: 1, height: 2, background: LINE, borderRadius: 2 }} />
-          <span style={{ fontSize: 12.5, fontWeight: 800, color: INK_SOFT, letterSpacing: ".06em" }}>of</span>
+          <span style={{ fontSize: 12.5, fontWeight: 800, color: INK_SOFT, letterSpacing: ".06em" }}>or</span>
           <span style={{ flex: 1, height: 2, background: LINE, borderRadius: 2 }} />
         </div>
 
-        {/* ② de fotoweg — bewaren, niet omzetten (dat doet Ichikawa later) */}
-        <section aria-label="Foto van een recept" style={{ padding: "12px 20px 22px", display: "flex", flexDirection: "column", gap: 12 }}>
+        {/* ② the photo route — stored, not converted (Ichikawa does that later) */}
+        <section aria-label="Photo of a recipe" style={{ padding: "12px 20px 22px", display: "flex", flexDirection: "column", gap: 12 }}>
           <h3 style={{ fontFamily: F_DISPLAY, fontSize: 15.5, fontWeight: 800, margin: 0, color: INK }}>
-            📷 Foto van een recept
+            📷 Photo of a recipe
           </h3>
 
-          {/* kiezen/maken — verborgen input onder de gestippelde pil (capture opent de camera) */}
+          {/* pick/take — hidden input under the dashed pill (capture opens the camera) */}
           <label className="kg-ich-btn"
             style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%",
               minHeight: 48, background: "#fff", border: `2px dashed ${SAKURA}`, borderRadius: R_LG,
@@ -2462,7 +2479,7 @@ function AddRecipeSheet({ url, setUrl, busy, err, onSubmit, onClose,
               cursor: photoBusy ? "not-allowed" : "pointer", opacity: photoBusy ? .6 : 1 }}>
             <span aria-hidden="true" style={{ fontSize: 17, lineHeight: 1 }}>{file ? "🖼" : "📷"}</span>
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {file ? file.name : "Maak of kies een foto"}
+              {file ? file.name : "Take or choose a photo"}
             </span>
             <input ref={fileRef} type="file" accept="image/*" capture="environment" disabled={photoBusy}
               onChange={e => { setFile(e.target.files && e.target.files[0] ? e.target.files[0] : null); }}
@@ -2471,7 +2488,7 @@ function AddRecipeSheet({ url, setUrl, busy, err, onSubmit, onClose,
 
           <input type="text" className="kg-ich-search-input" value={pNote} disabled={photoBusy}
             onChange={e => setPNote(e.target.value)} maxLength={200}
-            placeholder="Notitie (optioneel) — bv. kookboek p. 42"
+            placeholder="Note (optional) — e.g. cookbook p. 42"
             style={{ padding: "12px 16px" }} />
 
           {photoErr && (
@@ -2488,7 +2505,7 @@ function AddRecipeSheet({ url, setUrl, busy, err, onSubmit, onClose,
           )}
 
           <p style={{ fontSize: 12.5, color: G_MUTED, margin: 0, lineHeight: 1.6 }}>
-            De foto wordt alleen bewaard. Ichikawa leest de wachtrij later uit en maakt er een echt recept van 🍙
+            The photo is only stored. Ichikawa reads the queue later and turns it into a real recipe 🍙
           </p>
 
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -2497,7 +2514,7 @@ function AddRecipeSheet({ url, setUrl, busy, err, onSubmit, onClose,
                 color: "#fff", fontSize: 14.5, fontWeight: 800, minHeight: 48, padding: "11px 22px",
                 boxShadow: photoBusy || !file ? "none" : SHADOW_SOFT,
                 cursor: photoBusy || !file ? "not-allowed" : "pointer" }}>
-              {photoBusy ? "Bewaren…" : "Foto bewaren 📷"}
+              {photoBusy ? "Saving…" : "Save photo 📷"}
             </button>
           </div>
         </section>
@@ -2510,7 +2527,7 @@ function AddRecipeSheet({ url, setUrl, busy, err, onSubmit, onClose,
 // ─── Jumbo Gent floorplan SVG builder ────────────────────────────────────────
 // Same rendering as the standalone _output/ichikawa/route-map artifact — kept in
 // sync by hand. Builds a schematic plan: needed zones lit + numbered, the dashed
-// walking path INGANG → stops → Kassa's. STORE + engine are the shared sources.
+// walking path ENTRANCE → stops → Checkouts. STORE + engine are the shared sources.
 const _esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 function _wrapLabel(label) {
   if (label.length <= 15) return [label];
@@ -2544,7 +2561,7 @@ function buildFloorplanSVG(route) {
   const need = new Set(route.stops.map(s => s.zone.id));
   const numOf = {}; route.stops.forEach((s, i) => { numOf[s.zone.id] = i + 1; });
   const [vw, vh] = [STORE.viewBox[2], STORE.viewBox[3]];
-  let svg = `<svg viewBox="0 0 ${vw} ${vh}" width="100%" role="img" aria-label="Plattegrond Jumbo Gent met looproute">`;
+  let svg = `<svg viewBox="0 0 ${vw} ${vh}" width="100%" role="img" aria-label="Floorplan of Jumbo Gent with the walking route">`;
   svg += `<defs><marker id="ichArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#FF6E92"/></marker></defs>`;
   svg += `<rect x="8" y="8" width="${vw - 16}" height="${vh - 16}" rx="22" fill="#fff" stroke="${LINE}" stroke-width="2"/>`;
   for (const z of STORE.zones) {
@@ -2585,19 +2602,19 @@ function RouteSheet({ items, servings, checked, onToggle, onClose }) {
   return (
     <div onClick={onClose} className="kg-ich-overlay" style={{ position: "absolute", inset: 0, zIndex: 85, background: "rgba(75,59,66,.42)",
       display: "flex", alignItems: "flex-end", justifyContent: "center", animation: "ichFade .18s ease" }}>
-      <div onClick={e => e.stopPropagation()} role="dialog" aria-label="Plattegrond Jumbo Gent" className="kg-ich-sheet"
+      <div onClick={e => e.stopPropagation()} role="dialog" aria-label="Floorplan of Jumbo Gent" className="kg-ich-sheet"
         style={{ width: "100%", maxWidth: 640, maxHeight: "94%", background: CARD,
           borderRadius: `${R_LG}px ${R_LG}px 0 0`, overflow: "hidden", display: "flex", flexDirection: "column",
           animation: "ichSheet .22s ease", boxShadow: "0 -18px 60px rgba(150,110,80,.38)", fontFamily: F_ROUND, color: INK }}>
         <div style={{ position: "relative", padding: "10px 20px 14px", background: `linear-gradient(150deg, ${SAKURA}, ${AZUKI})`, color: "#fff" }}>
           <div aria-hidden="true" className="kg-ich-grab" style={{ width: 44, height: 5, borderRadius: 3, background: "rgba(255,255,255,.45)", margin: "0 auto 10px" }} />
-          <button className="kg-ich-btn" onClick={onClose} aria-label="sluiten"
+          <button className="kg-ich-btn" onClick={onClose} aria-label="close"
             style={{ position: "absolute", top: 14, right: 14, width: 36, height: 36, borderRadius: "50%",
               background: "rgba(255,255,255,.85)", border: "none", color: INK, fontSize: 16, lineHeight: 1, fontWeight: 800 }}>✕</button>
-          <div style={{ fontFamily: F_DISPLAY, fontSize: 18, fontWeight: 800 }}>🗺️ Looproute · Jumbo Foodmarkt Gent</div>
+          <div style={{ fontFamily: F_DISPLAY, fontSize: 18, fontWeight: 800 }}>🗺️ Walking route · Jumbo Foodmarkt Gent</div>
           <div style={{ fontSize: 13, opacity: .95, marginTop: 2 }}>
-            {route.total} items · {route.stops.length} {route.stops.length === 1 ? "halte" : "haltes"} · {servings}p
-            {overig ? ` · ${overig.items.length} onbekend ❓` : ""}
+            {route.total} items · {route.stops.length} {route.stops.length === 1 ? "stop" : "stops"} · {servings}p
+            {overig ? ` · ${overig.items.length} unknown ❓` : ""}
           </div>
         </div>
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14,
