@@ -36,7 +36,14 @@ with no KG dashboard around it.
 
 ```bash
 npm install
+cp .env.example .env   # optional — see below
 ```
+
+Both env vars are **optional**. With `LOCK_PASSPHRASE` unset the passphrase gate is a
+no-op pass-through, which is the normal local-dev setup: no unlock page, straight into
+the app. Only the exposed box needs them filled in. A fresh checkout also needs no data
+step — with `data/recipes/` empty the loader falls back to the committed seed and the
+app renders (the API reports `source: "seed"` instead of `"corpus"`).
 
 Two ways to run:
 
@@ -65,6 +72,54 @@ no command line needed for a one-off add.
 Its data lives under `data/` and is **gitignored**: `data/recipes/` (the corpus),
 `data/.hf-session.json` (saved login), `data/.hf-creds.json` (optional), the browser
 profile, and `data/box-history-urls.txt`. Only the seed and the store map are committed.
+
+## API
+
+The Express server in `server/index.js` is the whole contract — the React shell is just
+one client of it, and a second client (a native Android app, a script) needs nothing the
+web UI doesn't already use. All payloads are JSON.
+
+| Method | Path | Body / notes |
+| --- | --- | --- |
+| `GET` | `/api/recipes` | → `{ recipes, source, count }`; `source` is `corpus`, `seed` or `empty` |
+| `POST` | `/api/recipes/add` | `{ url }` — fetches + normalizes a schema.org recipe page. Slow (up to 55 s), `422` when the page has no recipe markup, `504` on timeout |
+| `POST` | `/api/recipes/:id/remove` | soft-remove — sets `keep:false`, never deletes |
+| `PUT` | `/api/recipes/:id` | partial patch of the editable fields; absent fields are left alone |
+| `PUT` | `/api/recipes/:id/ingredients` | `{ ingredients: [{name, qty, unit}] }`, max 100 rows |
+| `POST` | `/api/recipes/photo` | `{ dataUrl, note? }` — base64 JPG/PNG/WEBP/HEIC, max 15 MB. Stores only; no AI call happens here |
+| `GET` | `/api/recipes/photo-inbox` | → `{ items }`, pending photos, newest first |
+| `GET` | `/api/recipes/photo/:id/image` | raw image bytes |
+| `DELETE` | `/api/recipes/photo/:id` | hard delete — image + sidecar |
+
+Two behaviours worth knowing before writing a second client:
+
+- **Copy-on-write.** While the corpus is empty the app serves the committed seed. The
+  first write to a seed-only recipe materializes the *entire* served set into
+  `data/recipes/` — because the loader flips to corpus-only the moment any file exists.
+  So one edit from the Android app converts the whole library from seed to corpus. That
+  is intended, not a bug, but it means "edit one recipe" is a bigger write than it looks.
+- **Ids are path-checked.** Every `:id` route rejects `/`, `\` and `..` with a `400`.
+
+### Auth for a non-browser client
+
+`server/lock.mjs` fronts everything. When `LOCK_PASSPHRASE` is unset the gate is a
+pass-through and no auth is needed at all — which is the simplest way to develop against
+a local server. Against the tunnelled host, the flow is a cookie:
+
+```
+POST /__unlock   {"passphrase": "..."}   →  302 + Set-Cookie: ichikawa_lock=<token>
+```
+
+Send that cookie on every subsequent request. It is an `HttpOnly`, `SameSite=Lax`,
+~30-day HMAC token — an Android client needs a cookie jar (OkHttp `CookieJar`, or read
+the `Set-Cookie` header and store the value yourself). Notes:
+
+- `/api/*` **always** answers JSON, including `401 {"error":"locked"}` when locked out —
+  a non-browser client never has to parse the HTML lock page.
+- A `GET` for a non-`/api` path answers the lock page as **`200` HTML**, not a `401`.
+  Don't treat "got a 200" as "authenticated" when probing.
+- `/icon.svg`, `/apple-touch-icon.png`, `/manifest.webmanifest`, `/favicon.ico` and
+  `/sw.js` pass the gate unauthenticated by design.
 
 ## Box deploy
 
