@@ -58,6 +58,16 @@ try {
     git checkout --quiet $Branch
     git reset --hard --quiet "origin/$Branch"
 
+    # The Android client shares this repo but is not part of this deploy. When a
+    # range touches ONLY android/, rebuilding dist/ and bouncing PM2 achieves
+    # nothing — the checkout above is already up to date, so stop here rather
+    # than blip the running web app on every one of its commits.
+    git diff --quiet $local $remote -- . ':(exclude)android/'
+    if ($LASTEXITCODE -eq 0) {
+        Log "only android/ changed; checkout updated, no rebuild needed"
+        return
+    }
+
     # Reinstall dependencies only when the manifest/lockfile moved (fast path else).
     git diff --quiet $local $remote -- package.json package-lock.json
     if ($LASTEXITCODE -ne 0) {

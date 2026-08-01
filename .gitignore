@@ -10,3 +10,16 @@ data/.hf-browser-profile/
 data/box-history-urls.txt
 .DS_Store
 *.log
+
+# Android client (android/). local.properties is machine-specific (SDK path) and
+# a signing keystore is a secret — this repo is public, so neither goes in.
+android/.gradle/
+android/.idea/
+android/.cxx/
+android/build/
+android/*/build/
+android/local.properties
+*.apk
+*.aab
+*.jks
+*.keystore

@@ -32,6 +32,21 @@ UI keeps its `kg-` CSS class prefixes and `data-kg-*` attributes, and the kawaii
 look is unchanged. It now stands alone — its own Express server, Vite shell, and PWA,
 with no KG dashboard around it.
 
+## Layout
+
+One repo, two clients of the same Express server:
+
+```
+server/  engine/  src/  public/   the web app — Express API + Vite/React PWA
+android/                          the native Android client
+data/                             the corpus (gitignored) + committed seed
+```
+
+Both talk to the API documented below; `android/` never reads `data/` directly. The
+box deploy only ever builds and serves the web app — `scripts/autodeploy.ps1` skips its
+rebuild entirely when a push touched only `android/`, so Android work never bounces the
+running web app.
+
 ## Develop
 
 ```bash
