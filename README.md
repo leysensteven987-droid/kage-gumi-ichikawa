@@ -102,6 +102,7 @@ web UI doesn't already use. All payloads are JSON.
 | `PUT` | `/api/recipes/:id` | partial patch of the editable fields; absent fields are left alone |
 | `PUT` | `/api/recipes/:id/ingredients` | `{ ingredients: [{name, qty, unit}] }`, max 100 rows |
 | `POST` | `/api/recipes/photo` | `{ dataUrl, note? }` — base64 JPG/PNG/WEBP/HEIC, max 15 MB. Stores only; no AI call happens here |
+| `POST` | `/api/recipes/photo/recipe` | `{ ids: [photoId, …] }` — max 4 photos, read as pages of **one** dish → `{ ok, recipe }`. The only route that calls an LLM (and costs money). `503` without a key, `415` for HEIC, `422` when the pages aren't a recipe, `504` past 90 s |
 | `GET` | `/api/recipes/photo-inbox` | → `{ items }`, pending photos, newest first |
 | `GET` | `/api/recipes/photo/:id/image` | raw image bytes |
 | `DELETE` | `/api/recipes/photo/:id` | hard delete — image + sidecar |
@@ -114,6 +115,13 @@ Two behaviours worth knowing before writing a second client:
   So one edit from the Android app converts the whole library from seed to corpus. That
   is intended, not a bug, but it means "edit one recipe" is a bigger write than it looks.
 - **Ids are path-checked.** Every `:id` route rejects `/`, `\` and `..` with a `400`.
+- **Photos cost money exactly once, on request.** Uploading a photo is dumb storage.
+  `POST /api/recipes/photo/recipe` is the one route that sends the images to Claude
+  (`claude-opus-5`, vision — see `engine/photo-to-recipe.mjs`) and writes the result to
+  `data/recipes/<id>.json`. It needs `ANTHROPIC_API_KEY` in `.env`; without one the rest
+  of the app is unaffected. Converted photos stay on disk with `status:"done"` and
+  `recipeId` on their sidecar, so they drop out of `/api/recipes/photo-inbox` but the
+  recipe's `image` (which points at the first page) keeps working.
 
 ### Auth for a non-browser client
 

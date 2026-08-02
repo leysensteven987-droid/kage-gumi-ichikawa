@@ -16,6 +16,7 @@ import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, unlink
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { processUrl } from "../engine/enrich-recipes.mjs";
+import { photosToRecipe, hasCredentials } from "../engine/photo-to-recipe.mjs";
 import lock from "./lock.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -52,10 +53,11 @@ const REPO_ROOT = path.resolve(__dirname, "..");
 const DATA_DIR = path.join(REPO_ROOT, "data");
 const RECIPES_DIR = path.join(DATA_DIR, "recipes");
 // Photo inbox: a phone snapshot of a cookbook page / recipe card parks here as
-// <id>.<ext> + a <id>.json sidecar until a Claude Code session turns it into a
-// real recipe under data/recipes/. Deliberately DUMB storage — the server never
-// calls an AI/LLM, so there's no API key and no per-photo cost. Gitignored:
-// these are personal photos.
+// <id>.<ext> + a <id>.json sidecar until it is turned into a real recipe under
+// data/recipes/. Uploading stays DUMB storage — no AI, no key, no cost. The one
+// place that reads a photo with an LLM is the explicit
+// POST /api/recipes/photo/recipe below, which the user has to ask for.
+// Gitignored: these are personal photos.
 const PHOTO_DIR = path.join(DATA_DIR, "photo-inbox");
 const SEED_FILE = path.join(DATA_DIR, "recipes.sample.json");
 const DIST_DIR = path.join(REPO_ROOT, "dist");
@@ -461,6 +463,120 @@ app.delete("/api/recipes/photo/:id", (req, res) => {
   } catch {
     return res.status(500).json({ error: "failed to delete photo" });
   }
+});
+
+// Photos → one recipe. THE one route in this server that spends money: it reads
+// the chosen pages with Claude (vision) and writes data/recipes/<id>.json, so a
+// cookbook page becomes a real, editable, shoppable recipe like any scraped one.
+//
+// Several ids = several pages of the SAME dish (ingredients page + method page),
+// not several recipes. Bounded, because each page is a billed image.
+const MAX_PHOTOS_PER_RECIPE = 4;
+const CONVERT_TIMEOUT_MS = 90000; // under the tunnel/browser patience limit
+
+// Human sentences for the extractor's sentinels. Anything unlisted is a genuine
+// surprise and gets the generic line plus a server-side log.
+const CONVERT_ERRORS = {
+  __no_key__: [503, "no Claude key is configured on this server — set ANTHROPIC_API_KEY in .env"],
+  __unreadable__: [415, "I cannot read HEIC photos — please retake or save the page as JPG"],
+  __not_recipe__: [422, "I could not find a recipe on that photo"],
+  __refused__: [422, "I could not read that photo"],
+  __truncated__: [422, "that page is too long to read in one go — try one page at a time"],
+  __empty__: [422, "I could not find a recipe on that photo"],
+  __timeout__: [504, "reading the photo took too long — please try again"],
+};
+
+// The corpus loader flips to corpus-only the moment ANY file exists in
+// RECIPES_DIR, so writing the first file while the app is still on the seed
+// would hide the entire seed. Same copy-on-write the edit routes do: materialize
+// the served set first, then the new recipe is simply one more file.
+function materializeSeedIfEmpty() {
+  const { recipes, source } = loadIchikawaRecipes();
+  if (source !== "seed") return;
+  mkdirSync(RECIPES_DIR, { recursive: true });
+  for (const r of recipes) {
+    if (!r || !r.id || /[\\/]/.test(r.id) || r.id.includes("..")) continue;
+    const f = path.join(RECIPES_DIR, `${r.id}.json`);
+    if (!existsSync(f)) writeFileSync(f, JSON.stringify(r, null, 2));
+  }
+}
+
+// Never overwrite an existing recipe: two photos of two different "Pasta" pages
+// both slugify to `pasta`, so the second one becomes `pasta-2`.
+function freeRecipeId(base) {
+  const safe = base && !/[\\/]/.test(base) && !base.includes("..") ? base : "recipe";
+  if (!existsSync(path.join(RECIPES_DIR, `${safe}.json`))) return safe;
+  for (let n = 2; n < 100; n++) {
+    if (!existsSync(path.join(RECIPES_DIR, `${safe}-${n}.json`))) return `${safe}-${n}`;
+  }
+  return `${safe}-${Date.now()}`;
+}
+
+app.post("/api/recipes/photo/recipe", async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  if (!ids.length) return res.status(400).json({ error: "please choose at least one photo" });
+  if (ids.length > MAX_PHOTOS_PER_RECIPE) {
+    return res.status(400).json({ error: `at most ${MAX_PHOTOS_PER_RECIPE} photos make one recipe` });
+  }
+  if (!hasCredentials()) return res.status(503).json({ error: CONVERT_ERRORS.__no_key__[1] });
+
+  // Load every page first — a missing/bad id must fail before anything is billed.
+  const images = [];
+  const notes = [];
+  for (const raw of ids) {
+    const id = String(raw ?? "");
+    if (!id || /[\\/]/.test(id) || id.includes("..")) return res.status(400).json({ error: "invalid id" });
+    const sidecar = path.join(PHOTO_DIR, `${id}.json`);
+    if (!existsSync(sidecar)) return res.status(404).json({ error: "photo not found" });
+    try {
+      const item = JSON.parse(readFileSync(sidecar, "utf8"));
+      const name = String(item?.file || "");
+      if (!name || /[\\/]/.test(name) || name.includes("..")) return res.status(404).json({ error: "photo not found" });
+      const file = path.join(PHOTO_DIR, name);
+      if (!existsSync(file)) return res.status(404).json({ error: "photo not found" });
+      images.push({ base64: readFileSync(file).toString("base64"), mime: String(item.mime || "") });
+      if (item.note) notes.push(String(item.note));
+    } catch {
+      return res.status(500).json({ error: "failed to read photo" });
+    }
+  }
+
+  let recipe;
+  try {
+    recipe = await Promise.race([
+      photosToRecipe(images, { note: notes.join(" · "), photoIds: ids.map(String) }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("__timeout__")), CONVERT_TIMEOUT_MS)),
+    ]);
+  } catch (err) {
+    const known = CONVERT_ERRORS[err?.message];
+    if (known) return res.status(known[0]).json({ error: known[1] });
+    console.error("[ichikawa] photo→recipe failed:", err?.message || err);
+    return res.status(502).json({ error: "reading the photo did not work — please try again" });
+  }
+
+  try {
+    materializeSeedIfEmpty();
+    mkdirSync(RECIPES_DIR, { recursive: true });
+    recipe.id = freeRecipeId(recipe.id);
+    writeFileSync(path.join(RECIPES_DIR, `${recipe.id}.json`), JSON.stringify(recipe, null, 2));
+  } catch (err) {
+    console.error("[ichikawa] photo→recipe save failed:", err?.message || err);
+    return res.status(500).json({ error: "the recipe could not be saved" });
+  }
+
+  // The pages leave the queue but keep their bytes, so the recipe's photo (and a
+  // re-read after a bad transcription) still works. A failure here is cosmetic —
+  // the recipe is already saved, so don't fail the request over it.
+  for (const raw of ids) {
+    const sidecar = path.join(PHOTO_DIR, `${String(raw)}.json`);
+    try {
+      const item = JSON.parse(readFileSync(sidecar, "utf8"));
+      writeFileSync(sidecar, JSON.stringify({ ...item, status: "done", recipeId: recipe.id,
+        processedDate: new Date().toISOString() }, null, 2));
+    } catch {}
+  }
+
+  return res.json({ ok: true, recipe });
 });
 
 // Serve the built UI. Static assets first, then SPA fallback to index.html for any

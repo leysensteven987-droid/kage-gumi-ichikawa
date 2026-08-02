@@ -1,4 +1,5 @@
 /**
+ * @vibe-author STLE @version 11 @date 02AUG26 @comment Foto → recept — kies één of meer gefotografeerde pagina's van hetzelfde gerecht en laat de server ze met Claude uitlezen tot een echt, bewerkbaar recept
  * @vibe-author STLE @version 10 @date 30JUL26 @comment Interface is nu Engels — alle UI-copy, dag/maand-labels, filters, winkelzones en servermeldingen vertaald; recepten (titels, stappen, ingrediënten, keuken) blijven in hun eigen taal
  * @vibe-author STLE @version 9 @date 23JUL26 @comment Foto-inbox — recept fotograferen en bewaren; Ichikawa zet hem later om in een recept
  * @vibe-author STLE @version 8 @date 23JUL26 @comment Tijden volgen nu automatisch de stappen; handmatig ingevulde tijden blijven behouden
@@ -531,6 +532,11 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   const [photoBusy, setPhotoBusy]   = useState(false); // upload in flight
   const [photoErr, setPhotoErr]     = useState(null);  // inline error in the sheet
   const [photoOk, setPhotoOk]       = useState(null);  // inline confirmation in the sheet
+  // Photo → recipe: which queued pages are picked (several pages = ONE dish),
+  // whether a conversion is running, and the inline error of the last attempt.
+  const [photoPicked, setPhotoPicked] = useState([]);  // ids, in the order picked
+  const [photoConvBusy, setPhotoConvBusy] = useState(false);
+  const [photoConvErr, setPhotoConvErr]   = useState(null);
   const libRef  = useRef(null); // scroll target: empty slot / SHOP empty → bibliotheek
   const mainRef = useRef(null); // the mode scroll pane — reset scroll on mode switch
   const searchRef = useRef(null); // desktop '/': focus the library search
@@ -777,8 +783,9 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   }
 
   // Photograph a cookbook page → the server just STORES it (no AI call, no key,
-  // no cost). The photo lands in the photo inbox and Ichikawa turns it into a real
-  // recipe later. Returns true on success so the sheet can clear its own fields.
+  // no cost). The photo lands in the photo inbox; reading it into a recipe is a
+  // separate, deliberate press. Returns true on success so the sheet can clear
+  // its own fields.
   async function handleAddPhoto(file, note) {
     if (!file || photoBusy) return false;
     setPhotoBusy(true);
@@ -799,7 +806,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) throw new Error(data.error || "the photo could not be saved");
       await loadPhotoInbox();
-      setPhotoOk("Photo saved — Ichikawa will process it later. 📷");
+      setPhotoOk("Photo saved 📷 — close this and press “Make a recipe ✨” on it.");
       return true;
     } catch (err) {
       setPhotoErr(err.message || "the photo could not be saved");
@@ -809,8 +816,46 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     }
   }
 
+  // Pick / unpick a queued page. Several picked pages are read as ONE dish
+  // (ingredients page + method page), which is why order is kept.
+  function togglePhotoPick(id) {
+    setPhotoConvErr(null);
+    setPhotoPicked(prev => (prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]));
+  }
+
+  // Turn the picked pages into a real recipe. This is the one action in the app
+  // that costs money (the server reads the photos with Claude), so it only ever
+  // runs on this button — never on upload. The finished recipe drops straight
+  // into the library and the pages leave the queue.
+  async function handlePhotosToRecipe() {
+    const ids = photoPicked.filter(id => photoInbox.some(p => p.id === id));
+    if (!ids.length || photoConvBusy) return;
+    setPhotoConvBusy(true);
+    setPhotoConvErr(null);
+    try {
+      const res = await fetch("/api/recipes/photo/recipe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.recipe) throw new Error(data.error || "reading the photo did not work");
+      const recipe = data.recipe;
+      setRecipes(prev => [recipe, ...prev.filter(r => r.id !== recipe.id)]);
+      setPhotoPicked([]);
+      await loadPhotoInbox();
+      setAddNote(`"${recipe.title}" read from your photo 🍱`);
+      setTimeout(() => setAddNote(null), 3500);
+    } catch (err) {
+      setPhotoConvErr(err.message || "reading the photo did not work");
+    } finally {
+      setPhotoConvBusy(false);
+    }
+  }
+
   // Drop a photo from the inbox (image + sidecar), then re-read the queue.
   async function handleDeletePhoto(id) {
+    setPhotoPicked(prev => prev.filter(p => p !== id));
     try {
       const res = await fetch(`/api/recipes/photo/${encodeURIComponent(id)}`, { method: "DELETE" });
       if (!res.ok) throw new Error(String(res.status));
@@ -1150,24 +1195,41 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
                 <span aria-hidden="true" style={{ fontSize: 16, lineHeight: 1 }}>📷</span>
                 <span style={{ fontFamily: F_DISPLAY, fontSize: 14, fontWeight: 800, color: INK }}>
-                  {photoInbox.length} photo{photoInbox.length === 1 ? "" : "s"} waiting to be processed
+                  {photoInbox.length} photo{photoInbox.length === 1 ? "" : "s"} waiting to be read
                 </span>
               </div>
               <div className="kg-ich-chiprow" role="list" aria-label="photos in the queue"
                 style={{ alignItems: "flex-start" }}>
-                {photoInbox.map(p => (
+                {photoInbox.map(p => {
+                  const pickIdx = photoPicked.indexOf(p.id); // -1 when not picked
+                  const picked = pickIdx >= 0;
+                  return (
                   <div key={p.id} role="listitem" style={{ position: "relative", width: 84, flexShrink: 0 }}>
-                    <div style={{ position: "relative", width: 84, height: 84, borderRadius: R_MD, overflow: "hidden",
-                      background: `linear-gradient(150deg, ${RICE2}, ${BLUSH})`, boxShadow: SHADOW_SOFT }}>
+                    {/* the thumbnail itself is the pick toggle — tapping a page
+                        adds it to the next recipe, tapping again takes it out */}
+                    <button className="kg-ich-btn" onClick={() => togglePhotoPick(p.id)}
+                      aria-pressed={picked} disabled={photoConvBusy}
+                      aria-label={`${picked ? "unpick" : "pick"} photo${p.note ? ` (${p.note})` : ""}`}
+                      style={{ position: "relative", display: "block", width: 84, height: 84, padding: 0,
+                        borderRadius: R_MD, overflow: "hidden", cursor: photoConvBusy ? "wait" : "pointer",
+                        background: `linear-gradient(150deg, ${RICE2}, ${BLUSH})`, boxShadow: SHADOW_SOFT,
+                        border: picked ? `3px solid ${MATCHA_DP}` : "3px solid transparent" }}>
                       <img src={`/api/recipes/photo/${encodeURIComponent(p.id)}/image`} alt={p.note || "photographed recipe"}
                         loading="lazy" onError={e => { e.currentTarget.style.display = "none"; }}
                         style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
-                      <button className="kg-ich-btn" onClick={() => handleDeletePhoto(p.id)}
-                        aria-label={`delete photo${p.note ? ` (${p.note})` : ""}`}
-                        style={{ position: "absolute", top: 4, right: 4, width: 24, height: 24, borderRadius: "50%",
-                          border: "none", background: "rgba(255,255,255,.9)", color: AZUKI, fontSize: 12,
-                          fontWeight: 800, lineHeight: 1, padding: 0 }}>✕</button>
-                    </div>
+                      {/* the number, not just a tick: with two pages it says which
+                          one is page 1 and which is page 2 */}
+                      {picked && (
+                        <span aria-hidden="true" style={{ position: "absolute", left: 4, bottom: 4, minWidth: 20, height: 20,
+                          borderRadius: 10, background: MATCHA_DP, color: "#fff", fontSize: 11.5, fontWeight: 800,
+                          lineHeight: "20px", textAlign: "center", padding: "0 5px" }}>{pickIdx + 1}</span>
+                      )}
+                    </button>
+                    <button className="kg-ich-btn" onClick={() => handleDeletePhoto(p.id)} disabled={photoConvBusy}
+                      aria-label={`delete photo${p.note ? ` (${p.note})` : ""}`}
+                      style={{ position: "absolute", top: 4, right: 4, width: 24, height: 24, borderRadius: "50%",
+                        border: "none", background: "rgba(255,255,255,.9)", color: AZUKI, fontSize: 12,
+                        fontWeight: 800, lineHeight: 1, padding: 0 }}>✕</button>
                     {p.note && (
                       <div title={p.note} style={{ fontSize: 10.5, fontWeight: 700, color: INK_SOFT, marginTop: 4,
                         lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1175,7 +1237,31 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
                       </div>
                     )}
                   </div>
-                ))}
+                  );
+                })}
+              </div>
+
+              {photoConvErr && (
+                <div role="alert" style={{ background: "#FFECEF", color: AZUKI, fontSize: 12.5, fontWeight: 700,
+                  borderRadius: R_MD, padding: "9px 12px", lineHeight: 1.5, marginTop: 10 }}>
+                  😖 {photoConvErr}
+                </div>
+              )}
+
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
+                <p style={{ flex: "1 1 140px", fontSize: 11.5, color: G_MUTED, margin: 0, lineHeight: 1.5 }}>
+                  {photoPicked.length > 1
+                    ? `${photoPicked.length} pages → one recipe`
+                    : "Tap the pages of one dish, then read them 🍙"}
+                </p>
+                <button className="kg-ich-btn" onClick={handlePhotosToRecipe}
+                  disabled={photoConvBusy || !photoPicked.length}
+                  style={{ background: photoConvBusy || !photoPicked.length ? "#CDE9D5" : MATCHA_DP, border: "none",
+                    borderRadius: R_PILL, color: "#fff", fontSize: 13.5, fontWeight: 800, minHeight: 44,
+                    padding: "10px 18px", boxShadow: photoConvBusy || !photoPicked.length ? "none" : SHADOW_SOFT,
+                    cursor: photoConvBusy || !photoPicked.length ? "not-allowed" : "pointer" }}>
+                  {photoConvBusy ? "Reading…" : "Make a recipe ✨"}
+                </button>
               </div>
             </div>
           )}
@@ -2376,8 +2462,9 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
 //   🔗 URL   — the server pulls the page's schema.org JSON-LD into the corpus and
 //              hands the normalized recipe back, straight into the library.
 //   📷 PHOTO — a snapshot of a cookbook page is only STORED (photo inbox). No AI
-//              runs here; Ichikawa turns the queue into recipes later. Nothing
-//              lands in the library yet, so the copy must not promise that.
+//              runs here and nothing lands in the library yet, so the copy must
+//              not promise that: reading the page into a recipe is a separate
+//              press on the queue card ("Make a recipe ✨").
 function AddRecipeSheet({ url, setUrl, busy, err, onSubmit, onClose,
                           photoBusy, photoErr, photoOk, onSubmitPhoto }) {
   const inputRef = useRef(null);
@@ -2505,7 +2592,8 @@ function AddRecipeSheet({ url, setUrl, busy, err, onSubmit, onClose,
           )}
 
           <p style={{ fontSize: 12.5, color: G_MUTED, margin: 0, lineHeight: 1.6 }}>
-            The photo is only stored. Ichikawa reads the queue later and turns it into a real recipe 🍙
+            Saving only stores the photo. It waits in the queue on the recipes page, where
+            “Make a recipe ✨” reads it — pick both pages first if the dish runs over a spread 🍙
           </p>
 
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
