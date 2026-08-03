@@ -18,6 +18,7 @@ import path from "node:path";
 import { processUrl } from "../engine/enrich-recipes.mjs";
 import { photosToRecipe, hasCredentials } from "../engine/photo-to-recipe.mjs";
 import lock from "./lock.mjs";
+import httpsOnly from "./https-only.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -212,7 +213,8 @@ function readPhotoInbox() {
 }
 
 const app = express();
-app.use(lock); // FIRST middleware — gates everything below, including static + /api
+app.use(httpsOnly); // before lock — the passphrase page must never render over http
+app.use(lock); // FIRST gate — everything below is behind it, including static + /api
 // Every route keeps the SMALL default body limit (~100kb) — except the photo
 // upload, which brings its own 25mb parser. The global parser has to step aside
 // for that one path, or it would 413 a phone photo before the route ever runs.
