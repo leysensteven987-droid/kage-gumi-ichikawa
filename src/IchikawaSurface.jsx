@@ -2699,7 +2699,9 @@ function RouteSheet({ items, servings, checked, onToggle, onClose }) {
           <button className="kg-ich-btn" onClick={onClose} aria-label="close"
             style={{ position: "absolute", top: 14, right: 14, width: 36, height: 36, borderRadius: "50%",
               background: "rgba(255,255,255,.85)", border: "none", color: INK, fontSize: 16, lineHeight: 1, fontWeight: 800 }}>✕</button>
-          <div style={{ fontFamily: F_DISPLAY, fontSize: 18, fontWeight: 800 }}>🗺️ Walking route · Jumbo Foodmarkt Gent</div>
+          {/* keep clear of the round close button parked at top-right: at phone width the store
+              name ran underneath it and the last letters were unreadable */}
+          <div style={{ fontFamily: F_DISPLAY, fontSize: 18, fontWeight: 800, paddingRight: 44 }}>🗺️ Walking route · Jumbo Foodmarkt Gent</div>
           <div style={{ fontSize: 13, opacity: .95, marginTop: 2 }}>
             {route.total} items · {route.stops.length} {route.stops.length === 1 ? "stop" : "stops"} · {servings}p
             {overig ? ` · ${overig.items.length} unknown ❓` : ""}
