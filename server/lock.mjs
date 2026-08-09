@@ -116,6 +116,26 @@ function readCookie(req, name) {
 // Tailscale path.
 const isHttps = (req) => req.headers["x-forwarded-proto"] === "https";
 
+// Is this request a top-level document navigation (someone opening/reloading the
+// page) rather than a subresource fetch? Ported 05AUG26 from Tōge's lock.mjs
+// (commit 9ed2212) — the lock page below used to answer EVERY un-cookied GET
+// outside /api/ at 200 text/html, including built asset paths like
+// /assets/*.js. A 200 there is the problem: every consumer treats it as
+// success, so an un-cookied fetch for a real JS bundle got a lock-page HTML
+// body back at 200 instead of a refusal it could detect — and the service
+// worker's cache.put() (guarded separately below) had no signal to refuse
+// storing it. Sec-Fetch-Dest is the precise signal every browser sends:
+// 'document' for a navigation, something else ('script', 'style', 'empty', ...)
+// for every subresource fetch — so a present-but-different value is a hard NO,
+// not a fall-through. Only when the header is absent entirely (curl, an old
+// client predating Fetch Metadata) do we fall back to sniffing Accept for
+// text/html, the best such a client can do to say "I want a page".
+const isDocumentNav = (req) => {
+  const dest = req.headers["sec-fetch-dest"];
+  if (dest !== undefined) return dest === "document";
+  return String(req.headers["accept"] || "").includes("text/html");
+};
+
 function cookieHeader(token, req) {
   const bits = [`${COOKIE_NAME}=${token}`, "HttpOnly", "SameSite=Lax", "Path=/", `Max-Age=${TTL_SECONDS}`];
   if (isHttps(req)) bits.push("Secure");
@@ -280,8 +300,13 @@ export default function lock(req, res, next) {
   if (verifyToken(readCookie(req, COOKIE_NAME))) return next();
 
   // /api/* always gets JSON, regardless of method — a script/fetch client should
-  // never have to parse HTML to discover it's locked out.
-  if (req.method === "GET" && !req.path.startsWith("/api/")) {
+  // never have to parse HTML to discover it's locked out. And even outside
+  // /api/, the lock PAGE is only handed to a genuine document navigation — a
+  // GET for /assets/*.js or any other subresource is exactly as un-cookied but
+  // is not a browser tab that can render a form, so it gets the same 401 JSON
+  // refusal /api/* does rather than a 200 text/html body a fetch/XHR client (or
+  // this app's own service worker) would silently swallow as "healthy".
+  if (req.method === "GET" && !req.path.startsWith("/api/") && isDocumentNav(req)) {
     noStore(res).status(200).send(lockPageHtml());
     return;
   }
