@@ -14,7 +14,7 @@
 //
 // Bump CACHE on every shape change so `activate` purges the previous version's
 // pinned shell from already-installed clients.
-const CACHE = "ichikawa-v4";
+const CACHE = "ichikawa-v5";
 const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/icon.svg?v=2", "/apple-touch-icon.png?v=2"];
 
 self.addEventListener("install", (event) => {
@@ -54,8 +54,11 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
-  // API: network-first, fall back to cached copy.
-  if (url.pathname.startsWith("/api/recipes")) {
+  // API: network-first, fall back to cached copy. The whole /api/ prefix, not
+  // just /api/recipes — the default branch below is CACHE-FIRST, so any API
+  // route that isn't listed here would be answered from a stale copy forever
+  // (the pantry would never see what another device put on the shelf).
+  if (url.pathname.startsWith("/api/")) {
     event.respondWith(networkFirst(req));
     return;
   }
