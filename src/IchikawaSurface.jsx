@@ -589,6 +589,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   const [addUrl, setAddUrl]   = useState("");      // the pasted recipe link
   const [addBusy, setAddBusy] = useState(false);   // URL request in flight
   const [addErr, setAddErr]   = useState(null);    // inline error in the sheet
+  const [addDup, setAddDup]   = useState(null);    // {id,title} the link collided with
   const [addNote, setAddNote] = useState(null);    // success toast
   // ── Photo inbox: photographed recipe pages waiting to be turned into recipes.
   // Pure storage — nothing here calls an AI; a Claude Code session reads the queue
@@ -602,6 +603,9 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   const [photoPicked, setPhotoPicked] = useState([]);  // ids, in the order picked
   const [photoConvBusy, setPhotoConvBusy] = useState(false);
   const [photoConvErr, setPhotoConvErr]   = useState(null);
+  // A read that came back as a duplicate: the card it matches, plus the token
+  // that saves the (already paid for) reading anyway without a second AI call.
+  const [photoConvDup, setPhotoConvDup]   = useState(null); // {title, pending}
   const libRef  = useRef(null); // scroll target: empty slot / SHOP empty → bibliotheek
   const mainRef = useRef(null); // the mode scroll pane — reset scroll on mode switch
   const searchRef = useRef(null); // desktop '/': focus the library search
@@ -816,19 +820,27 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   // Add a recipe from a pasted URL: POST to the server (schema.org JSON-LD →
   // corpus JSON), then splice the normalized recipe straight into the library so
   // it shows without a reload. A re-add un-hides a previously soft-removed card.
-  async function handleAddFromUrl(e) {
+  // The library refuses a dish it already holds (same link, or same title): the
+  // server answers 409 and the sheet offers "Add it anyway", which comes back
+  // through here with force=true.
+  async function handleAddFromUrl(e, force = false) {
     if (e && e.preventDefault) e.preventDefault();
     const url = addUrl.trim();
     if (!url || addBusy) return;
     setAddBusy(true);
     setAddErr(null);
+    setAddDup(null);
     try {
       const res = await fetch("/api/recipes/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify(force ? { url, force: true } : { url }),
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 409 && data.duplicate) {
+        setAddDup(data.duplicate);
+        throw new Error(data.error || "that recipe is already in your library");
+      }
       if (!res.ok || !data.recipe) throw new Error(data.error || "adding failed");
       const recipe = data.recipe;
       setRecipes(prev => [recipe, ...prev.filter(r => r.id !== recipe.id)]);
@@ -892,18 +904,27 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   // that costs money (the server reads the photos with Claude), so it only ever
   // runs on this button — never on upload. The finished recipe drops straight
   // into the library and the pages leave the queue.
-  async function handlePhotosToRecipe() {
+  //
+  // A dish already in the library is refused before it is written — the pages
+  // stay in the queue. `pending` redeems that refused reading unchanged, so
+  // saying "save it anyway" never pays for a second read.
+  async function handlePhotosToRecipe(pending = null) {
     const ids = photoPicked.filter(id => photoInbox.some(p => p.id === id));
-    if (!ids.length || photoConvBusy) return;
+    if ((!ids.length && !pending) || photoConvBusy) return;
     setPhotoConvBusy(true);
     setPhotoConvErr(null);
+    setPhotoConvDup(null);
     try {
       const res = await fetch("/api/recipes/photo/recipe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids }),
+        body: JSON.stringify(pending ? { pending } : { ids }),
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 409 && data.duplicate) {
+        setPhotoConvDup({ title: data.duplicate.title, pending: data.pending || null });
+        throw new Error(data.error || "that recipe is already in your library");
+      }
       if (!res.ok || !data.recipe) throw new Error(data.error || "reading the photo did not work");
       const recipe = data.recipe;
       setRecipes(prev => [recipe, ...prev.filter(r => r.id !== recipe.id)]);
@@ -1343,7 +1364,18 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
               {photoConvErr && (
                 <div role="alert" style={{ background: "#FFECEF", color: AZUKI, fontSize: 12.5, fontWeight: 700,
                   borderRadius: R_MD, padding: "9px 12px", lineHeight: 1.5, marginTop: 10 }}>
-                  😖 {photoConvErr}
+                  {photoConvDup ? "🍱" : "😖"} {photoConvErr}
+                  {/* two dishes really can share a name — the refusal must not be
+                      a dead end, and the reading is already paid for */}
+                  {photoConvDup?.pending && (
+                    <button className="kg-ich-btn" onClick={() => handlePhotosToRecipe(photoConvDup.pending)}
+                      disabled={photoConvBusy}
+                      style={{ display: "block", marginTop: 8, background: "#fff", border: `2px solid ${AZUKI}`,
+                        borderRadius: R_PILL, color: AZUKI, fontSize: 12.5, fontWeight: 800, minHeight: 40,
+                        padding: "8px 14px", cursor: photoConvBusy ? "wait" : "pointer" }}>
+                      Save it anyway
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -2143,10 +2175,10 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
       )}
 
       {/* ── add-a-recipe sheet — link or photo ── */}
-      {addOpen && <AddRecipeSheet url={addUrl} setUrl={setAddUrl} busy={addBusy} err={addErr}
-        onSubmit={handleAddFromUrl}
+      {addOpen && <AddRecipeSheet url={addUrl} setUrl={setAddUrl} busy={addBusy} err={addErr} dup={addDup}
+        onSubmit={handleAddFromUrl} onForce={() => handleAddFromUrl(null, true)}
         photoBusy={photoBusy} photoErr={photoErr} photoOk={photoOk} onSubmitPhoto={handleAddPhoto}
-        onClose={() => { if (!addBusy && !photoBusy) { setAddOpen(false); setAddErr(null); setPhotoErr(null); setPhotoOk(null); } }} />}
+        onClose={() => { if (!addBusy && !photoBusy) { setAddOpen(false); setAddErr(null); setAddDup(null); setPhotoErr(null); setPhotoOk(null); } }} />}
 
       {/* ── recipe card sheet ── */}
       {detail && <RecipeSheet recipe={detail} servings={servings} count={countOf(detail.id)}
@@ -2675,7 +2707,7 @@ function RecipeSheet({ recipe: r, servings, count, canAdd, onAdd, onRemoveOne, o
 //              runs here and nothing lands in the library yet, so the copy must
 //              not promise that: reading the page into a recipe is a separate
 //              press on the queue card ("Make a recipe ✨").
-function AddRecipeSheet({ url, setUrl, busy, err, onSubmit, onClose,
+function AddRecipeSheet({ url, setUrl, busy, err, dup, onSubmit, onForce, onClose,
                           photoBusy, photoErr, photoOk, onSubmitPhoto }) {
   const inputRef = useRef(null);
   const fileRef  = useRef(null);
@@ -2732,7 +2764,16 @@ function AddRecipeSheet({ url, setUrl, busy, err, onSubmit, onClose,
           {err && (
             <div role="alert" style={{ background: "#FFECEF", color: AZUKI, fontSize: 13, fontWeight: 700,
               borderRadius: R_MD, padding: "10px 13px", lineHeight: 1.5 }}>
-              😖 {err}
+              {dup ? "🍱" : "😖"} {err}
+              {/* the block is a warning, not a wall — two dishes can share a name */}
+              {dup && (
+                <button type="button" className="kg-ich-btn" onClick={onForce} disabled={busy}
+                  style={{ display: "block", marginTop: 9, background: "#fff", border: `2px solid ${AZUKI}`,
+                    borderRadius: R_PILL, color: AZUKI, fontSize: 13, fontWeight: 800, minHeight: 44,
+                    padding: "9px 16px", cursor: busy ? "wait" : "pointer" }}>
+                  Add it anyway
+                </button>
+              )}
             </div>
           )}
           <p style={{ fontSize: 12.5, color: G_MUTED, margin: 0, lineHeight: 1.6 }}>

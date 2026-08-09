@@ -13,6 +13,7 @@
 
 import express from "express";
 import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { processUrl } from "../engine/enrich-recipes.mjs";
@@ -212,6 +213,101 @@ function readPhotoInbox() {
   return items.sort((a, b) => String(b.addedDate || "").localeCompare(String(a.addedDate || "")));
 }
 
+// ─── duplicate guard ─────────────────────────────────────────────────────────
+// Adding the same dish twice is the mistake this app makes easiest: the link
+// route is a paste (the same link goes in twice), the photo route is a snapshot
+// of a page that may already be in the library. Both write a NEW corpus file, so
+// the duplicate becomes a second card that can also land twice in the week and
+// double its own ingredients on the shopping list.
+//
+// Two recipes are the same dish when their source URL OR their title matches
+// after normalization. Soft-removed recipes (keep:false) never count — re-adding
+// one is how you bring it back, and loadIchikawaRecipes drops them already.
+
+// The same page reached two ways must collapse to one key: scheme and host case,
+// a leading www., a trailing slash, tracking params and the #hash are all noise.
+const TRACKING_PARAM = /^(utm_|fbclid|gclid|mc_(cid|eid)|ref|source|igshid$)/i;
+function canonicalUrl(raw) {
+  const s = typeof raw === "string" ? raw.trim() : "";
+  if (!s) return "";
+  try {
+    const u = new URL(s);
+    for (const k of [...u.searchParams.keys()]) if (TRACKING_PARAM.test(k)) u.searchParams.delete(k);
+    u.searchParams.sort();
+    const host = u.hostname.toLowerCase().replace(/^www\./, "");
+    const pathname = u.pathname.replace(/\/+$/, "");
+    return `${host}${pathname}${u.search}`;
+  } catch {
+    return s.toLowerCase();
+  }
+}
+
+// "Kip-curry  met RIJST!" and "kip curry met rijst" are one dish.
+function normalizeTitle(raw) {
+  return String(raw ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+// First existing recipe that is the same dish as {sourceUrl, title}, or null.
+// exceptId skips the recipe being refreshed — re-enriching the same page is an
+// update, not a duplicate.
+function findDuplicate(recipes, { sourceUrl = "", title = "", exceptId = "" } = {}) {
+  const url = canonicalUrl(sourceUrl);
+  const name = normalizeTitle(title);
+  if (!url && !name) return null;
+  for (const r of recipes) {
+    if (!r || r.keep === false || (exceptId && r.id === exceptId)) continue;
+    if (url && canonicalUrl(r.sourceUrl) === url) return r;
+    if (name && normalizeTitle(r.title) === name) return r;
+  }
+  return null;
+}
+
+// 409 + the card it collides with, so the UI can name it and offer "add anyway".
+function duplicateResponse(res, dup, extra = {}) {
+  return res.status(409).json({
+    error: `“${dup.title || dup.id}” is already in your library`,
+    duplicate: { id: dup.id, title: dup.title || dup.id },
+    ...extra,
+  });
+}
+
+// processUrl writes data/recipes/<derived-id>.json itself, merging into that file
+// when it already exists. Right for a re-enrich of the SAME page, wrong when two
+// different pages derive the same id (two sites' "pasta") — the second add would
+// silently eat the first. So snapshot the corpus before the call and put it back
+// whenever the result must not stand: a blocked duplicate, or an id collision
+// that has to be re-saved under a free id instead.
+function snapshotCorpus() {
+  const files = new Map();
+  try {
+    for (const e of readdirSync(RECIPES_DIR, { withFileTypes: true })) {
+      if (!e.isFile() || !e.name.toLowerCase().endsWith(".json")) continue;
+      files.set(e.name, readFileSync(path.join(RECIPES_DIR, e.name), "utf8"));
+    }
+  } catch {} // no corpus dir yet — an empty snapshot just deletes whatever appeared
+  return files;
+}
+
+function restoreCorpus(snap) {
+  if (!snap) return;
+  try {
+    for (const e of readdirSync(RECIPES_DIR, { withFileTypes: true })) {
+      if (!e.isFile() || !e.name.toLowerCase().endsWith(".json")) continue;
+      const full = path.join(RECIPES_DIR, e.name);
+      const was = snap.get(e.name);
+      if (was === undefined) unlinkSync(full);
+      else if (was !== readFileSync(full, "utf8")) writeFileSync(full, was);
+    }
+  } catch (err) {
+    console.error("[ichikawa] corpus restore failed:", err?.message || err);
+  }
+}
+
 const app = express();
 app.use(httpsOnly); // before lock — the passphrase page must never render over http
 app.use(lock); // FIRST gate — everything below is behind it, including static + /api
@@ -243,13 +339,54 @@ app.post("/api/recipes/add", async (req, res) => {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     return res.status(400).json({ error: "only http(s) links can be added" });
   }
+  // "Add it anyway" — the user has seen the collision and wants both cards.
+  const force = req.body?.force === true;
+
+  // The link alone already catches the common case (same page pasted twice), and
+  // it catches it before a single byte is fetched.
+  const { recipes: before, source } = loadIchikawaRecipes();
+  if (!force) {
+    const dup = findDuplicate(before, { sourceUrl: url });
+    if (dup) return duplicateResponse(res, dup);
+  }
+  // processUrl writes straight into RECIPES_DIR, and the loader flips to
+  // corpus-only the moment any file is there — so on a seed install the first
+  // add would hide the seed and, with it, everything the guard compares against.
+  if (source === "seed") materializeSeedIfEmpty();
+  const snapshot = snapshotCorpus();
+
   try {
     // Bound the whole fetch+render so a slow/blocking site fails with a message
     // instead of hanging the request until the browser/tunnel drops it ("Load failed").
-    const recipe = await Promise.race([
+    let recipe = await Promise.race([
       processUrl(url),
       new Promise((_, reject) => setTimeout(() => reject(new Error("__timeout__")), 55000)),
     ]);
+    // The title only exists once the page is read, so the second half of the
+    // check runs here — and rolls the write back when it fails.
+    if (!force) {
+      const dup = findDuplicate(before, { title: recipe.title, sourceUrl: recipe.sourceUrl, exceptId: recipe.id });
+      if (dup) {
+        restoreCorpus(snapshot);
+        return duplicateResponse(res, dup);
+      }
+    }
+    // Re-adding is the way back for a culled dish — and, now that the guard
+    // sends people there, it has to actually stick. processUrl carries the old
+    // keep flag over (right for a plain refresh), but deliberately pasting the
+    // link of a soft-removed recipe means "I want this one in the library again".
+    const unculled = recipe.keep === false;
+    if (unculled) recipe = { ...recipe, keep: true };
+    // Not a duplicate, but its derived id belongs to a different recipe that
+    // processUrl just merged over. Undo that and give this one a free id.
+    const collided = before.find((r) => r.id === recipe.id && canonicalUrl(r.sourceUrl) !== canonicalUrl(recipe.sourceUrl));
+    if (collided) {
+      restoreCorpus(snapshot);
+      recipe = { ...recipe, id: freeRecipeId(recipe.id) };
+    }
+    if (collided || unculled) {
+      writeFileSync(path.join(RECIPES_DIR, `${recipe.id}.json`), JSON.stringify(recipe, null, 2));
+    }
     return res.json({ ok: true, recipe });
   } catch (err) {
     const msg = err?.message || String(err);
@@ -581,7 +718,66 @@ function freeRecipeId(base) {
   return `${safe}-${Date.now()}`;
 }
 
+// Write a finished photo→recipe into the corpus and clear its pages from the
+// queue. Shared by a fresh read and by the redeemed "save it anyway".
+function savePhotoRecipe(res, recipe, ids) {
+  try {
+    materializeSeedIfEmpty();
+    mkdirSync(RECIPES_DIR, { recursive: true });
+    recipe.id = freeRecipeId(recipe.id);
+    writeFileSync(path.join(RECIPES_DIR, `${recipe.id}.json`), JSON.stringify(recipe, null, 2));
+  } catch (err) {
+    console.error("[ichikawa] photo→recipe save failed:", err?.message || err);
+    return res.status(500).json({ error: "the recipe could not be saved" });
+  }
+
+  // The pages leave the queue but keep their bytes, so the recipe's photo (and a
+  // re-read after a bad transcription) still works. A failure here is cosmetic —
+  // the recipe is already saved, so don't fail the request over it.
+  for (const raw of ids) {
+    const sidecar = path.join(PHOTO_DIR, `${String(raw)}.json`);
+    try {
+      const item = JSON.parse(readFileSync(sidecar, "utf8"));
+      writeFileSync(sidecar, JSON.stringify({ ...item, status: "done", recipeId: recipe.id,
+        processedDate: new Date().toISOString() }, null, 2));
+    } catch {}
+  }
+
+  return res.json({ ok: true, recipe });
+}
+
+// A photo read that turns out to be a duplicate has ALREADY been paid for (the
+// pages went to Claude). Throwing it away would mean billing a second read just
+// to say "yes, both". So park it here and hand back a token: "Save it anyway"
+// redeems the token and writes the recipe as-is. In memory on purpose — a
+// restart losing it costs nothing but a re-read.
+const PENDING_TTL_MS = 15 * 60 * 1000;
+const pendingPhotoRecipes = new Map(); // token → { recipe, ids, at }
+
+function holdPendingRecipe(recipe, ids) {
+  const now = Date.now();
+  for (const [t, held] of pendingPhotoRecipes) if (now - held.at > PENDING_TTL_MS) pendingPhotoRecipes.delete(t);
+  const token = randomUUID();
+  pendingPhotoRecipes.set(token, { recipe, ids, at: now });
+  return token;
+}
+
+function takePendingRecipe(token) {
+  const held = pendingPhotoRecipes.get(token);
+  if (!held) return null;
+  pendingPhotoRecipes.delete(token);
+  return Date.now() - held.at > PENDING_TTL_MS ? null : held;
+}
+
 app.post("/api/recipes/photo/recipe", async (req, res) => {
+  // "Save it anyway" after a duplicate — redeem the read we already paid for.
+  const pending = typeof req.body?.pending === "string" ? req.body.pending : "";
+  if (pending) {
+    const held = takePendingRecipe(pending);
+    if (!held) return res.status(410).json({ error: "that reading expired — please read the pages again" });
+    return savePhotoRecipe(res, held.recipe, held.ids);
+  }
+
   const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
   if (!ids.length) return res.status(400).json({ error: "please choose at least one photo" });
   if (ids.length > MAX_PHOTOS_PER_RECIPE) {
@@ -623,29 +819,16 @@ app.post("/api/recipes/photo/recipe", async (req, res) => {
     return res.status(502).json({ error: "reading the photo did not work — please try again" });
   }
 
-  try {
-    materializeSeedIfEmpty();
-    mkdirSync(RECIPES_DIR, { recursive: true });
-    recipe.id = freeRecipeId(recipe.id);
-    writeFileSync(path.join(RECIPES_DIR, `${recipe.id}.json`), JSON.stringify(recipe, null, 2));
-  } catch (err) {
-    console.error("[ichikawa] photo→recipe save failed:", err?.message || err);
-    return res.status(500).json({ error: "the recipe could not be saved" });
+  // Nothing is written yet, so a duplicate simply doesn't land — the pages stay
+  // in the queue, and the finished read waits under a token in case the answer
+  // is "both of them are mine".
+  if (req.body?.force !== true) {
+    const { recipes: existing } = loadIchikawaRecipes();
+    const dup = findDuplicate(existing, { title: recipe.title, sourceUrl: recipe.sourceUrl });
+    if (dup) return duplicateResponse(res, dup, { pending: holdPendingRecipe(recipe, ids.map(String)) });
   }
 
-  // The pages leave the queue but keep their bytes, so the recipe's photo (and a
-  // re-read after a bad transcription) still works. A failure here is cosmetic —
-  // the recipe is already saved, so don't fail the request over it.
-  for (const raw of ids) {
-    const sidecar = path.join(PHOTO_DIR, `${String(raw)}.json`);
-    try {
-      const item = JSON.parse(readFileSync(sidecar, "utf8"));
-      writeFileSync(sidecar, JSON.stringify({ ...item, status: "done", recipeId: recipe.id,
-        processedDate: new Date().toISOString() }, null, 2));
-    } catch {}
-  }
-
-  return res.json({ ok: true, recipe });
+  return savePhotoRecipe(res, recipe, ids);
 });
 
 // Serve the built UI. Static assets first, then SPA fallback to index.html for any
