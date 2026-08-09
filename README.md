@@ -106,6 +106,8 @@ web UI doesn't already use. All payloads are JSON.
 | `GET` | `/api/recipes/photo-inbox` | → `{ items }`, pending photos, newest first |
 | `GET` | `/api/recipes/photo/:id/image` | raw image bytes |
 | `DELETE` | `/api/recipes/photo/:id` | hard delete — image + sidecar |
+| `GET` | `/api/pantry` | → `{ items, count }` — the home stock, `[{name, unit, qty, added}]` |
+| `PUT` | `/api/pantry` | `{ items: [...] }` — replaces the whole list, max 400 rows. `qty` is a number > 0 or `null` ("have some, amount unknown"); `added` is `YYYY-MM-DD` |
 
 Two behaviours worth knowing before writing a second client:
 
@@ -115,6 +117,11 @@ Two behaviours worth knowing before writing a second client:
   So one edit from the Android app converts the whole library from seed to corpus. That
   is intended, not a bug, but it means "edit one recipe" is a bigger write than it looks.
 - **Ids are path-checked.** Every `:id` route rejects `/`, `\` and `..` with a `400`.
+- **The pantry is whole-list PUT, and matching is fuzzy on purpose.** It is one small
+  single-user file, so replacing the array is simpler and race-free enough. A client must
+  match a pantry line to a recipe ingredient the way `src/lib/pantry.js` does — the route
+  engine's `normalize()` plus a unit-alias table — or `(s) Ui / stuk` and `Ui / stuks`
+  will look like two different things and the same onion gets bought twice.
 - **Photos cost money exactly once, on request.** Uploading a photo is dumb storage.
   `POST /api/recipes/photo/recipe` is the one route that sends the images to Claude
   (`claude-opus-5`, vision — see `engine/photo-to-recipe.mjs`) and writes the result to

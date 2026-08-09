@@ -361,6 +361,73 @@ app.put("/api/recipes/:id", (req, res) => {
   }
 });
 
+// ─── Pantry — what is already in the kitchen ─────────────────────────────────
+// One small file, data/pantry.json ({ items, updated }), because the pantry is
+// DURABLE data, not UI state: it has to survive a cache clear, and the phone in
+// the aisle must see what the laptop put away on Sunday. The whole list is
+// small (a few dozen lines), single-user and rewritten as a unit, so a plain
+// GET/PUT of the full array is both simplest and race-free enough.
+//
+// Missing/corrupt file degrades to an empty pantry — never a 500, same contract
+// as the recipe loader above.
+const PANTRY_FILE = path.join(DATA_DIR, "pantry.json");
+const MAX_PANTRY = 400;
+
+// qty is a finite number ≥ 0, or null meaning "have some, amount unknown"
+// (the spice-rack case — see src/lib/pantry.js for the rule).
+function sanitizePantry(input) {
+  if (!Array.isArray(input)) return null;
+  const out = [];
+  const seen = new Set();
+  for (const it of input.slice(0, MAX_PANTRY)) {
+    if (!it || typeof it !== "object") continue;
+    const name = String(it.name ?? "").trim().slice(0, MAX_FIELD);
+    if (!name) continue;
+    const unit = String(it.unit ?? "").trim().slice(0, MAX_FIELD);
+    const dedupe = `${name.toLowerCase()}__${unit.toLowerCase()}`;
+    if (seen.has(dedupe)) continue;
+    seen.add(dedupe);
+    let qty = it.qty;
+    if (qty === "" || qty == null) qty = null; // "have some, amount unknown"
+    else {
+      // A number that isn't a real positive amount is dropped rather than
+      // promoted to null — null means "always in stock", and garbage input must
+      // never quietly take something off the shopping list forever.
+      qty = Number(qty);
+      if (!Number.isFinite(qty) || qty <= 0) continue;
+    }
+    const added = /^\d{4}-\d{2}-\d{2}$/.test(String(it.added ?? "")) ? String(it.added) : null;
+    out.push({ name, unit, qty, added });
+  }
+  return out;
+}
+
+function readPantry() {
+  try {
+    const raw = JSON.parse(readFileSync(PANTRY_FILE, "utf8"));
+    return sanitizePantry(Array.isArray(raw) ? raw : raw?.items) || [];
+  } catch {
+    return [];
+  }
+}
+
+app.get("/api/pantry", (_req, res) => {
+  const items = readPantry();
+  res.json({ items, count: items.length });
+});
+
+app.put("/api/pantry", (req, res) => {
+  const items = sanitizePantry(req.body?.items);
+  if (!items) return res.status(400).json({ error: "invalid pantry" });
+  try {
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(PANTRY_FILE, JSON.stringify({ items, updated: new Date().toISOString() }, null, 2));
+    return res.json({ ok: true, items });
+  } catch {
+    return res.status(500).json({ error: "failed to save pantry" });
+  }
+});
+
 // ─── Photo inbox ─────────────────────────────────────────────────────────────
 // Snap a cookbook page / recipe card on the phone; it is STORED, nothing more.
 // No AI call happens here (no key, no cost) — a Claude Code session reads the
