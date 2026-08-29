@@ -509,6 +509,10 @@ app.put("/api/recipes/:id", (req, res) => {
 // as the recipe loader above.
 const PANTRY_FILE = path.join(DATA_DIR, "pantry.json");
 const MAX_PANTRY = 400;
+// Manual shopping-list extras — things no recipe covers (toothpaste, coffee,
+// washing-up liquid). Durable for the same reason as the pantry: what you add
+// at the laptop has to show up on the phone in the aisle.
+const SHOPPING_FILE = path.join(DATA_DIR, "shopping.json");
 
 // qty is a finite number ≥ 0, or null meaning "have some, amount unknown"
 // (the spice-rack case — see src/lib/pantry.js for the rule).
@@ -562,6 +566,56 @@ app.put("/api/pantry", (req, res) => {
     return res.json({ ok: true, items });
   } catch {
     return res.status(500).json({ error: "failed to save pantry" });
+  }
+});
+
+// ─── Shopping-list extras — things the recipes don't cover ───────────────────
+// Same shape and contract as the pantry, but the qty rule differs: an amount-less
+// line is the NORMAL case here ("just grab some"), never a prompt to drop the row.
+// So a blank/bad amount degrades to null instead of discarding the line.
+function sanitizeShopping(input) {
+  if (!Array.isArray(input)) return null;
+  const out = [];
+  const seen = new Set();
+  for (const it of input.slice(0, MAX_PANTRY)) {
+    if (!it || typeof it !== "object") continue;
+    const name = String(it.name ?? "").trim().slice(0, MAX_FIELD);
+    if (!name) continue;
+    const unit = String(it.unit ?? "").trim().slice(0, MAX_FIELD);
+    const dedupe = `${name.toLowerCase()}__${unit.toLowerCase()}`;
+    if (seen.has(dedupe)) continue;
+    seen.add(dedupe);
+    let qty = it.qty;
+    if (qty === "" || qty == null) qty = null;
+    else { qty = Number(qty); if (!Number.isFinite(qty) || qty <= 0) qty = null; }
+    out.push({ name, unit, qty });
+  }
+  return out;
+}
+
+function readShopping() {
+  try {
+    const raw = JSON.parse(readFileSync(SHOPPING_FILE, "utf8"));
+    return sanitizeShopping(Array.isArray(raw) ? raw : raw?.items) || [];
+  } catch {
+    return [];
+  }
+}
+
+app.get("/api/shopping", (_req, res) => {
+  const items = readShopping();
+  res.json({ items, count: items.length });
+});
+
+app.put("/api/shopping", (req, res) => {
+  const items = sanitizeShopping(req.body?.items);
+  if (!items) return res.status(400).json({ error: "invalid shopping list" });
+  try {
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(SHOPPING_FILE, JSON.stringify({ items, updated: new Date().toISOString() }, null, 2));
+    return res.json({ ok: true, items });
+  } catch {
+    return res.status(500).json({ error: "failed to save shopping list" });
   }
 });
 

@@ -312,6 +312,7 @@ const LS = {
   mode:     "kg-ich-mode",
   deskSide: "kg-ich-desk-side", // desktop-only: which job the side panel shows
   pantry:   "kg-ich-pantry",    // offline mirror of the server's pantry.json
+  shopping: "kg-ich-shopping",  // offline mirror of the server's shopping.json
   cooked:   "kg-ich-cooked",    // week slots already drawn down from the pantry
 };
 function lsRead(key, fallback) {
@@ -334,6 +335,34 @@ const MODES = [
 
 // Grocery-line identity: name + unit (unit-aware dedupe key, also the tick key).
 const keyOf = it => `${it.name}__${it.unit || ""}`;
+
+// Manual shopping-list extras (toothpaste, coffee — nothing a recipe asked for)
+// live in their own durable list. Identity uses the SAME lowercase name+unit key
+// the recipe aggregation uses, so a hand-added line and a recipe line for the
+// same thing collapse to one instead of sitting twice in the aisle.
+const shopKey = (name, unit) => `${String(name ?? "").trim().toLowerCase()}__${String(unit ?? "").trim().toLowerCase()}`;
+function addShoppingLine(list, line) {
+  const name = String(line?.name ?? "").trim();
+  if (!name) return list;
+  const unit = String(line?.unit ?? "").trim();
+  const n = Number(line?.qty);
+  const qty = line?.qty === "" || line?.qty == null || !Number.isFinite(n) || n <= 0 ? null : Math.round(n * 100) / 100;
+  const key = shopKey(name, unit);
+  const out = [...(list || [])];
+  const i = out.findIndex(it => shopKey(it.name, it.unit) === key);
+  if (i < 0) out.push({ name, unit, qty });
+  else {
+    const cur = out[i];
+    // unmeasured on either side stays unmeasured — "some coffee" isn't made
+    // numeric by adding another "some coffee".
+    out[i] = cur.qty == null || qty == null ? { name, unit, qty: null } : { name, unit, qty: Math.round((cur.qty + qty) * 100) / 100 };
+  }
+  return out;
+}
+function removeShoppingLine(list, name, unit) {
+  const k = shopKey(name, unit);
+  return (list || []).filter(it => shopKey(it.name, it.unit) !== k);
+}
 
 // ─── Mascots — inline SVG sticker set (dot eyes, blush, smile). Each tied to
 //     an app state; all self-contained, no external assets. ─────────────────
@@ -558,6 +587,43 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
       });
     return next;
   }, []);
+
+  // ── Shopping-list extras — same server-owned + localStorage-mirror pattern as
+  // the pantry, for the lines no recipe generates. Merged into the week list in
+  // the shoppingList memo below, so they ride the same aisle route and ticks.
+  const [shopping, setShopping] = useState(() => {
+    const v = lsRead(LS.shopping, []);
+    return Array.isArray(v) ? v : [];
+  });
+  const [shoppingErr, setShoppingErr] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    API_GET("/api/shopping")
+      .then(d => { if (alive && Array.isArray(d?.items)) { setShopping(d.items); lsWrite(LS.shopping, d.items); } })
+      .catch(() => {}); // offline: keep the mirror we booted with
+    return () => { alive = false; };
+  }, []);
+
+  const saveShopping = useCallback(next => {
+    setShopping(next);
+    lsWrite(LS.shopping, next);
+    fetch("/api/shopping", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: next }),
+    })
+      .then(r => { if (!r.ok) throw new Error(String(r.status)); setShoppingErr(null); })
+      .catch(() => {
+        setShoppingErr("List saved on this phone — the server didn't answer 😖");
+        setTimeout(() => setShoppingErr(null), 3500);
+      });
+    return next;
+  }, []);
+
+  const removeManualLine = useCallback((name, unit) => {
+    saveShopping(removeShoppingLine(shopping, name, unit));
+  }, [shopping, saveShopping]);
 
   // ── Desktop desk — ONE JS breakpoint. Below it the phone shell renders
   // exactly as before; above it the same pieces rearrange into three columns.
@@ -978,10 +1044,28 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
         }
       }
     });
+    // Manual extras — things no recipe asked for (toothpaste, coffee). Merged on
+    // the SAME key as the recipe loop, so a hand-added "koffie" and a recipe that
+    // also needs koffie collapse to one line. qty stays null for "just grab some";
+    // `manual` marks the row so SHOP can offer a remove ✕ and putAway can clear it.
+    for (const it of shopping || []) {
+      const name = String(it?.name ?? "").trim();
+      if (!name) continue;
+      const unit = String(it?.unit ?? "").trim();
+      const key = shopKey(name, unit);
+      const n = Number(it?.qty);
+      const qty = it?.qty == null || !Number.isFinite(n) ? null : n;
+      const cur = acc.get(key);
+      if (cur) {
+        if (qty != null && cur.qty != null) cur.qty += qty; // a recipe also needs it
+      } else {
+        acc.set(key, { name, unit, qty, from: 0, days: [], manual: true });
+      }
+    }
     // Sorted with the Dutch collator: the NAMES are ingredient data from the
     // corpus, not interface copy, so they keep their own language's ordering.
     return [...acc.values()].sort((a, b) => a.name.localeCompare(b.name, "nl"));
-  }, [selected, servings, byId]);
+  }, [selected, servings, byId, shopping]);
 
   // ── The week list, minus the cupboard ─────────────────────────────────────
   // Everything downstream of here shops the SHORTFALL, not the recipe total:
@@ -1005,13 +1089,21 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   const allDone = toBuy.length > 0 && checkedCount === toBuy.length;
 
   // End of the trip: everything ticked goes onto the shelf at the quantity you
-  // actually bought, and the ticks reset for the next round.
+  // actually bought, and the ticks reset for the next round. Manual extras
+  // (toothpaste, coffee) don't belong on a shelf — ticked ones just leave the
+  // list, because their job is done the moment they're in the bag.
   const putAway = useCallback(() => {
     const got = toBuy.filter(it => aisleChecked.has(keyOf(it)));
     if (!got.length) return;
-    savePantry(addStock(pantry, got, today));
+    const recipeGot = got.filter(it => !it.manual);
+    const manualGot = got.filter(it => it.manual);
+    if (recipeGot.length) savePantry(addStock(pantry, recipeGot, today));
+    if (manualGot.length) {
+      const done = new Set(manualGot.map(it => shopKey(it.name, it.unit)));
+      saveShopping(shopping.filter(it => !done.has(shopKey(it.name, it.unit))));
+    }
     setAisleChecked(new Set());
-  }, [toBuy, aisleChecked, pantry, today, savePantry]);
+  }, [toBuy, aisleChecked, pantry, today, savePantry, shopping, saveShopping]);
 
   // Week frame (MON..SUN of the current week) + the "tonight" hero slot.
   // Slot i of the plan = weekday i (MON..SUN); hero = today's slot if filled,
@@ -1573,6 +1665,9 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     return (
       <div style={PANE}>
         <SecTag k="買" label="Groceries" right={total ? `${checkedCount} / ${total} IN THE CART` : "JUMBO GENT"} />
+        <div style={{ marginBottom: 14 }}>
+          <ShopAddForm onAdd={line => saveShopping(addShoppingLine(shopping, line))} />
+        </div>
         {!loaded ? loadingCard : total === 0 ? (
           <div style={{ background: CARD, borderRadius: R_LG, padding: "36px 20px", boxShadow: SHADOW_SOFT,
             display: "flex", flexDirection: "column", alignItems: "center", gap: 12, textAlign: "center", color: INK_SOFT }}>
@@ -1592,7 +1687,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
             ) : (
               <>
                 <span style={{ fontSize: 14.5, fontWeight: 700, lineHeight: 1.6, maxWidth: "34ch" }}>
-                  Your list is still empty. Fill the week menu first and the scout will sort your groceries aisle by aisle. 🐾
+                  Your list is still empty. Fill the week menu — or add something by hand above — and the scout will sort your groceries aisle by aisle. 🐾
                 </span>
                 <button className="kg-ich-btn" onClick={goPlanLibrary}
                   style={{ background: SAKURA, border: "none", borderRadius: R_PILL, color: "#fff",
@@ -1677,6 +1772,10 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
                         <label key={`${key}_${j}`} className={`kg-ich-gitem${on ? " kg-ich-gitem--on" : ""}`}>
                           <input type="checkbox" checked={on} onChange={() => toggleAisle(key)} />
                           <span className="kg-ich-gnm">{it.name}</span>
+                          {it.manual && (
+                            <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: "0.08em", color: MATCHA_DP,
+                              background: "#E8F6EC", borderRadius: R_PILL, padding: "2px 6px", whiteSpace: "nowrap" }}>＋ ADDED</span>
+                          )}
                           {it.days && it.days.length > 0 && (
                             <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.12em", color: "#C58A16",
                               background: "#FFF5DE", borderRadius: R_PILL, padding: "2px 7px", whiteSpace: "nowrap" }}>
@@ -1695,6 +1794,15 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
                               {fmtQty(it.qty)} {it.unit}
                             </span>
                           ) : null}
+                          {it.manual && (
+                            <span role="button" tabIndex={0} aria-label={`remove ${it.name} from the list`}
+                              onClick={e => { e.preventDefault(); e.stopPropagation(); removeManualLine(it.name, it.unit); }}
+                              onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); removeManualLine(it.name, it.unit); } }}
+                              style={{ flexShrink: 0, fontSize: 14, color: INK_SOFT, fontWeight: 800, padding: "2px 6px",
+                                cursor: "pointer", borderRadius: 8 }}>
+                              ✕
+                            </span>
+                          )}
                         </label>
                       );
                     })}
@@ -2192,6 +2300,15 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
           background: "#FFF0E6", color: SAKURA_DP, fontSize: 14, fontWeight: 700, textAlign: "center",
           borderRadius: R_MD, padding: "11px 16px", boxShadow: SHADOW_LIFT, animation: "ichPop .2s ease" }}>
           {pantryErr}
+        </div>
+      )}
+
+      {/* ── shopping-list save warning toast ── */}
+      {shoppingErr && (
+        <div role="status" style={{ position: "absolute", left: 16, right: 16, bottom: 96, zIndex: 90,
+          background: "#FFF0E6", color: SAKURA_DP, fontSize: 14, fontWeight: 700, textAlign: "center",
+          borderRadius: R_MD, padding: "11px 16px", boxShadow: SHADOW_LIFT, animation: "ichPop .2s ease" }}>
+          {shoppingErr}
         </div>
       )}
 
@@ -3004,6 +3121,62 @@ function RouteSheet({ items, servings, checked, onToggle, onClose }) {
 // one-thumbed with a cupboard door open. The 🫙 pill flips a line between a
 // measured amount and "have some" (null): the spice-rack state, which covers a
 // recipe line whatever it asks for and never depletes when you cook.
+// Add-to-list — a hand-typed line for what the recipes don't cover (toothpaste,
+// coffee, washing-up liquid). Collapsed to one pill button so the SHOP checklist
+// stays the point; opening it reveals the same name/amount/unit trio the pantry
+// uses. Amount left blank = "just grab some" (qty null).
+function ShopAddForm({ onAdd }) {
+  const [open, setOpen] = useState(false);
+  const [nm, setNm] = useState("");
+  const [q, setQ] = useState("");
+  const [u, setU] = useState("");
+  function submit(e) {
+    e.preventDefault();
+    const name = nm.trim();
+    if (!name) return;
+    const n = Number(q);
+    onAdd({ name, unit: u.trim(), qty: q.trim() === "" || !Number.isFinite(n) ? null : n });
+    setNm(""); setQ(""); setU(""); setOpen(false);
+  }
+  const inputStyle = { minHeight: 44, borderRadius: R_SM, border: `2px solid ${LINE}`, background: "#fff",
+    color: INK, fontFamily: F_ROUND, fontSize: 14.5, fontWeight: 700, padding: "8px 12px", minWidth: 0 };
+
+  if (!open) {
+    return (
+      <button className="kg-ich-btn" onClick={() => setOpen(true)}
+        style={{ width: "100%", background: "#fff", border: `2px dashed ${LINE}`, borderRadius: R_PILL,
+          color: MATCHA_DP, fontSize: 13.5, fontWeight: 800, minHeight: 44, padding: "10px 18px" }}>
+        ＋ Add something the recipes don't cover
+      </button>
+    );
+  }
+  return (
+    <form onSubmit={submit} style={{ background: CARD, borderRadius: R_LG, padding: 12, boxShadow: SHADOW_SOFT }}>
+      <SecTag onCard k="＋" label="Add by hand" />
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input value={nm} onChange={e => setNm(e.target.value)} placeholder="Item — coffee, toothpaste…"
+          aria-label="Item" style={{ ...inputStyle, flex: "1 1 100%" }} />
+        <input value={q} onChange={e => setQ(e.target.value)} inputMode="decimal" placeholder="Amount — blank = grab some"
+          aria-label="Amount" style={{ ...inputStyle, flex: "2 1 140px" }} />
+        <input value={u} onChange={e => setU(e.target.value)} placeholder="Unit"
+          aria-label="Unit" style={{ ...inputStyle, flex: "1 1 80px" }} />
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <button type="submit" disabled={!nm.trim()} className="kg-ich-btn"
+          style={{ flex: 1, background: nm.trim() ? MATCHA_DP : "#DFD3C8", border: "none", borderRadius: R_PILL,
+            color: "#fff", fontSize: 14.5, fontWeight: 800, minHeight: 48, padding: "12px 20px" }}>
+          ＋ Add to the list
+        </button>
+        <button type="button" className="kg-ich-btn" onClick={() => { setOpen(false); setNm(""); setQ(""); setU(""); }}
+          style={{ background: "#fff", border: `2px solid ${LINE}`, borderRadius: R_PILL, color: INK_SOFT,
+            fontSize: 13.5, fontWeight: 800, minHeight: 48, padding: "12px 18px" }}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function PantrySheet({ items, today, onSet, onRemove, onAdd, onClose }) {
   useEffect(() => {
     const onKey = e => { if (e.key === "Escape") onClose(); };

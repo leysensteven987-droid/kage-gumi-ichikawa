@@ -5,6 +5,7 @@ data/recipes/*
 !data/recipes/.gitkeep
 data/photo-inbox/
 data/pantry.json
+data/shopping.json
 data/.hf-session.json
 data/.hf-creds.json
 data/.hf-browser-profile/

@@ -108,6 +108,8 @@ web UI doesn't already use. All payloads are JSON.
 | `DELETE` | `/api/recipes/photo/:id` | hard delete — image + sidecar |
 | `GET` | `/api/pantry` | → `{ items, count }` — the home stock, `[{name, unit, qty, added}]` |
 | `PUT` | `/api/pantry` | `{ items: [...] }` — replaces the whole list, max 400 rows. `qty` is a number > 0 or `null` ("have some, amount unknown"); `added` is `YYYY-MM-DD` |
+| `GET` | `/api/shopping` | → `{ items, count }` — manual list extras (toothpaste, coffee), `[{name, unit, qty}]` |
+| `PUT` | `/api/shopping` | `{ items: [...] }` — replaces the whole list, max 400 rows. `qty` is a number > 0 or `null` ("just grab some"); a blank/bad amount degrades to `null`, never drops the line |
 
 Two behaviours worth knowing before writing a second client:
 
