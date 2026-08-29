@@ -1047,7 +1047,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     // Manual extras — things no recipe asked for (toothpaste, coffee). Merged on
     // the SAME key as the recipe loop, so a hand-added "koffie" and a recipe that
     // also needs koffie collapse to one line. qty stays null for "just grab some";
-    // `manual` marks the row so SHOP can offer a remove ✕ and putAway can clear it.
+    // `manual` marks the row so SHOP can offer a remove ✕ and put-away can clear it.
     for (const it of shopping || []) {
       const name = String(it?.name ?? "").trim();
       if (!name) continue;
@@ -1088,22 +1088,18 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   );
   const allDone = toBuy.length > 0 && checkedCount === toBuy.length;
 
-  // End of the trip: everything ticked goes onto the shelf at the quantity you
-  // actually bought, and the ticks reset for the next round. Manual extras
-  // (toothpaste, coffee) don't belong on a shelf — ticked ones just leave the
-  // list, because their job is done the moment they're in the bag.
-  const putAway = useCallback(() => {
-    const got = toBuy.filter(it => aisleChecked.has(keyOf(it)));
-    if (!got.length) return;
-    const recipeGot = got.filter(it => !it.manual);
-    const manualGot = got.filter(it => it.manual);
-    if (recipeGot.length) savePantry(addStock(pantry, recipeGot, today));
-    if (manualGot.length) {
-      const done = new Set(manualGot.map(it => shopKey(it.name, it.unit)));
-      saveShopping(shopping.filter(it => !done.has(shopKey(it.name, it.unit))));
-    }
+  // End of the trip. "Put away" opens a sheet so you can set the weight you
+  // *actually* bought (blank = "have some") before it lands in the pantry.
+  // Manual extras also leave the list here — they're pantry stock now too.
+  const [putAwayItems, setPutAwayItems] = useState(null);
+  const confirmPutAway = useCallback((lines) => {
+    if (!lines || !lines.length) return;
+    savePantry(addStock(pantry, lines, today));
+    const manualKeys = new Set(lines.filter(l => l.manual).map(l => shopKey(l.name, l.unit)));
+    if (manualKeys.size) saveShopping(shopping.filter(it => !manualKeys.has(shopKey(it.name, it.unit))));
     setAisleChecked(new Set());
-  }, [toBuy, aisleChecked, pantry, today, savePantry, shopping, saveShopping]);
+    setPutAwayItems(null);
+  }, [pantry, today, savePantry, shopping, saveShopping]);
 
   // Week frame (MON..SUN of the current week) + the "tonight" hero slot.
   // Slot i of the plan = weekday i (MON..SUN); hero = today's slot if filled,
@@ -1822,7 +1818,8 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
               </p>
               {checkedCount > 0 && (
                 <>
-                  <button className="kg-ich-btn" onClick={putAway}
+                  <button className="kg-ich-btn"
+                    onClick={() => setPutAwayItems(toBuy.filter(it => aisleChecked.has(keyOf(it))))}
                     style={{ width: "100%", marginTop: 8, background: `linear-gradient(150deg, ${MATCHA}, ${MATCHA_DP})`,
                       border: "none", borderRadius: R_PILL, color: "#fff", fontSize: 14.5, fontWeight: 800,
                       minHeight: 48, padding: "12px 20px", boxShadow: "0 8px 18px rgba(95,174,119,.34)" }}>
@@ -2322,6 +2319,10 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
         onRemove={key => savePantry(removeStock(pantry, key))}
         onAdd={line => savePantry(addStock(pantry, [line], today))}
         onClose={() => setShowPantry(false)} />}
+
+      {/* ── put-away sheet — confirm the weight you actually bought ── */}
+      {putAwayItems && <PutAwaySheet items={putAwayItems}
+        onConfirm={confirmPutAway} onClose={() => setPutAwayItems(null)} />}
     </div>
   );
 }
@@ -3174,6 +3175,81 @@ function ShopAddForm({ onAdd }) {
         </button>
       </div>
     </form>
+  );
+}
+
+// Put-away sheet — the last word on what actually went in the bag. Each ticked
+// line defaults to the week-list need; overwrite the weight to what you bought,
+// or leave it blank for "have some". Confirm folds everything into the pantry.
+function PutAwaySheet({ items, onConfirm, onClose }) {
+  const [vals, setVals] = useState({});
+  useEffect(() => {
+    const seed = {};
+    for (const it of items || []) seed[keyOf(it)] = it.qty == null ? "" : String(it.qty);
+    setVals(seed);
+  }, [items]);
+
+  useEffect(() => {
+    const onKey = e => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  function submit() {
+    const lines = (items || []).map(it => {
+      const raw = String(vals[keyOf(it)] ?? "").trim();
+      const n = Number(raw);
+      const qty = raw === "" || !Number.isFinite(n) || n <= 0 ? null : Math.round(n * 100) / 100;
+      return { name: it.name, unit: it.unit, qty, manual: it.manual };
+    });
+    onConfirm(lines);
+  }
+
+  const inputStyle = { minHeight: 44, borderRadius: R_SM, border: `2px solid ${LINE}`, background: "#fff",
+    color: INK, fontFamily: F_ROUND, fontSize: 14.5, fontWeight: 700, padding: "8px 12px", minWidth: 0 };
+  const total = (items || []).length;
+
+  return (
+    <div onClick={onClose} className="kg-ich-overlay" style={{ position: "absolute", inset: 0, zIndex: 87, background: "rgba(75,59,66,.42)",
+      display: "flex", alignItems: "flex-end", justifyContent: "center", animation: "ichFade .18s ease" }}>
+      <div onClick={e => e.stopPropagation()} role="dialog" aria-label="Put away groceries" className="kg-ich-sheet"
+        style={{ width: "100%", maxWidth: 640, maxHeight: "94%", background: CARD,
+          borderRadius: `${R_LG}px ${R_LG}px 0 0`, overflow: "hidden", display: "flex", flexDirection: "column",
+          animation: "ichSheet .22s ease", boxShadow: "0 -18px 60px rgba(150,110,80,.38)", fontFamily: F_ROUND, color: INK }}>
+        <div style={{ position: "relative", padding: "10px 20px 14px", background: `linear-gradient(150deg, ${MATCHA}, ${MATCHA_DP})`, color: "#fff" }}>
+          <div aria-hidden="true" className="kg-ich-grab" style={{ width: 44, height: 5, borderRadius: 3, background: "rgba(255,255,255,.45)", margin: "0 auto 10px" }} />
+          <button className="kg-ich-btn" onClick={onClose} aria-label="close"
+            style={{ position: "absolute", top: 14, right: 14, width: 36, height: 36, borderRadius: "50%",
+              background: "rgba(255,255,255,.85)", border: "none", color: INK, fontSize: 16, lineHeight: 1, fontWeight: 800 }}>✕</button>
+          <div style={{ fontFamily: F_DISPLAY, fontSize: 18, fontWeight: 800, paddingRight: 44 }}>🫙 Put it away</div>
+          <div style={{ fontSize: 13, opacity: .95, marginTop: 2 }}>Set the weight you actually bought — leave blank for "have some".</div>
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10,
+          padding: "16px 16px 20px" }}>
+          {(items || []).map((it, i) => (
+            <div key={`${keyOf(it)}_${i}`} style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 52,
+              border: `1px solid ${LINE}`, borderRadius: 14, padding: "8px 12px", background: "#FFFCF8" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: INK, lineHeight: 1.35, overflowWrap: "anywhere" }}>{it.name}</div>
+                {it.manual && <span style={{ display: "inline-block", marginTop: 3, fontSize: 9, fontWeight: 800, letterSpacing: "0.08em",
+                  color: MATCHA_DP, background: "#E8F6EC", borderRadius: R_PILL, padding: "2px 6px" }}>＋ ADDED</span>}
+              </div>
+              <input value={vals[keyOf(it)] ?? ""} onChange={e => setVals(v => ({ ...v, [keyOf(it)]: e.target.value }))}
+                inputMode="decimal" placeholder="have some" aria-label={`amount of ${it.name}`}
+                style={{ ...inputStyle, width: 96, flexShrink: 0, textAlign: "center" }} />
+              <span style={{ flexShrink: 0, minWidth: 34, fontSize: 13, fontWeight: 700, color: INK_SOFT }}>{it.unit}</span>
+            </div>
+          ))}
+          <button type="button" onClick={submit} className="kg-ich-btn"
+            style={{ width: "100%", background: `linear-gradient(150deg, ${MATCHA}, ${MATCHA_DP})`, border: "none",
+              borderRadius: R_PILL, color: "#fff", fontSize: 14.5, fontWeight: 800, minHeight: 48, padding: "12px 20px",
+              boxShadow: "0 8px 18px rgba(95,174,119,.34)" }}>
+            🫙 Put {total} away in the pantry
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
