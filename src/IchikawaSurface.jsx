@@ -3020,7 +3020,16 @@ function buildFloorplanSVG(route) {
   const [vw, vh] = [STORE.viewBox[2], STORE.viewBox[3]];
   let svg = `<svg viewBox="0 0 ${vw} ${vh}" width="100%" role="img" aria-label="Floorplan of Jumbo Gent with the walking route">`;
   svg += `<defs><marker id="ichArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#FF6E92"/></marker></defs>`;
-  svg += `<rect x="8" y="8" width="${vw - 16}" height="${vh - 16}" rx="22" fill="#fff" stroke="${LINE}" stroke-width="2"/>`;
+  // the real building is a slanted trapezoid (entrance wall runs diagonally) — draw its outline
+  // when the store file carries one, else the old plain rounded box
+  svg += STORE.outline
+    ? `<polygon points="${STORE.outline.map(p => p.join(",")).join(" ")}" fill="#fff" stroke="${LINE}" stroke-width="2.5" stroke-linejoin="round"/>`
+    : `<rect x="8" y="8" width="${vw - 16}" height="${vh - 16}" rx="22" fill="#fff" stroke="${LINE}" stroke-width="2"/>`;
+  // non-shopping landmarks (picnic area, service desk…) — faint, orientation only
+  for (const l of STORE.landmarks || []) {
+    svg += `<g opacity="0.8"><rect x="${l.x}" y="${l.y}" width="${l.w}" height="${l.h}" rx="10" fill="none" stroke="${LINE}" stroke-width="1.5" stroke-dasharray="4 4"/>`
+      + `<text x="${l.x + l.w / 2}" y="${l.y + l.h / 2 + 4}" text-anchor="middle" font-size="11" font-weight="600" fill="${INK_SOFT}">${l.emoji} ${_esc(l.label)}</text></g>`;
+  }
   for (const z of STORE.zones) {
     if (z.id === "overig" && !need.has("overig")) continue;
     const s = route.stops.find(st => st.zone.id === z.id);

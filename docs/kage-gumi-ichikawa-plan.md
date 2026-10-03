@@ -128,7 +128,7 @@ restaurant. Style tile: <https://claude.ai/code/artifact/1237e43a-a8b9-4d6e-8c31
 
 ---
 
-## Store route map — SHIPPED 2026-07-19 (geometry needs a correction pass)
+## Store route map — SHIPPED 2026-07-19 · geometry corrected 2026-10-03
 
 Ichi's shopping list is bucketed into Jumbo Foodmarkt Gent zones and re-ordered along
 the store's walking path, drawn as a schematic floorplan + walk-ordered checklist.
@@ -144,12 +144,7 @@ the store's walking path, drawn as a schematic floorplan + walk-ordered checklis
 - Standalone proof: `_output/ichikawa/route-map/jumbo-gent-route.html` (gitignored
   personal tree — regenerate by inlining the store JSON + classifier).
 
-**TODO — floorplan accuracy.** Zone geometry is a hand-built *schematic*: it preserves the
-real topology (fresh perimeter top/right, dry grid left, frozen centre, ingang bottom-centre,
-kassa bottom-left) but the positions are **not 100% faithful** to the actual store. Steven
-flagged this 2026-07-19; a correction pass against the PDF is deferred. Consequence: the
-drawn path crosses the store more than a real lap would. Zone *membership* and walk *order*
-are unaffected — only the drawn coordinates.
+**Floorplan accuracy — CORRECTED 2026-10-03.** Zone rects were re-measured off the official PDF (crop scaled onto the 1000×640 viewBox) and the store now draws as its real slanted-trapezoid `outline`, with faint non-shopping `landmarks` (picnic area, service desk, self-scan, flowers). Walk order changed to match the real aisles: dairy → breakfast → pasta → world → spices → sweets → drinks → non-food → frozen last. Still schematic: the left-wall beer/wine strip folds into the Drinks block, and Spices/Sweets/Pasta/World are column-width approximations of blurry PDF aisle boundaries.
 
 Possible follow-ups: truer zone coordinates, less spaghetti path routing (aisle-aware /
 orthogonal), per-store variants (Delhaize / AH), manual re-bucket override in the UI.
