@@ -1,0 +1,63 @@
+{
+  "enabled": true,
+  "branch": "main",
+  "seatDir": "C:UsersSteven.claude-b",
+  "claudeBin": "C:UsersStevenAppDataRoaming\npmclaude.cmd",
+  "beacon": "C:devkage-gumiscriptskg-proc-beacon.mjs",
+  "kgLogTask": "C:devkage-gumiscriptslog-task.mjs",
+  "defaultModel": "sonnet",
+  "timeoutMin": 45,
+  "maxTurns": 200,
+  "maxFailures": 2,
+  "lanes": [
+    "REL",
+    "TUNE"
+  ],
+  "gateTimeoutSec": 900,
+  "keepBackups": 7,
+  "minFreeMb": 1024,
+  "app": "Ichikawa",
+  "kgAgent": "ICHIKAWA",
+  "window": [
+    1,
+    3
+  ],
+  "gates": [
+    "npm run build",
+    "npm run test --if-present"
+  ],
+  "pm2Process": "kage-gumi-ichikawa",
+  "deploy": {
+    "enabled": true,
+    "install": "npm ci --no-audit --no-fund",
+    "steps": [
+      "npm run build",
+      "pm2 restart kage-gumi-ichikawa"
+    ],
+    "stepTimeoutSec": 900
+  },
+  "smoke": {
+    "waitSec": 5,
+    "http": [
+      {
+        "url": "http://127.0.0.1:5273/manifest.webmanifest",
+        "expect": [
+          200
+        ]
+      },
+      {
+        "url": "http://127.0.0.1:5273/api/recipes",
+        "expect": [
+          200,
+          401
+        ]
+      }
+    ]
+  },
+  "backup": [
+    "data/recipes",
+    "data/pantry.json",
+    "data/shopping.json",
+    "data/photo-inbox"
+  ]
+}
