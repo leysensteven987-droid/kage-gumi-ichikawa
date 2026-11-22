@@ -221,15 +221,19 @@ const G_DOTS  = `color-mix(in srgb, var(--kg-border, ${LINE}) 60%, transparent)`
 const DAY_ABBR = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
 const DAY_FULL = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"];
 const MON_ABBR = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-function weekInfo(now = new Date()) {
+// offset 0 = this week, 1 = next week. `key` (local YYYY-MM-DD of the Monday)
+// is what each week's plan is stored under.
+function weekInfo(offset = 0, now = new Date()) {
   const todayIdx = (now.getDay() + 6) % 7; // Monday = 0
-  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - todayIdx);
+  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - todayIdx + 7 * offset);
+  now = monday; // ISO week number below is computed for the shown week
   const days = Array.from({ length: 7 }, (_, i) =>
     new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i));
   const t = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
   t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7)); // ISO week via nearest Thursday
   const week = Math.ceil((((t - Date.UTC(t.getUTCFullYear(), 0, 1)) / 86400000) + 1) / 7);
-  return { todayIdx, days, week };
+  const key = `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, "0")}-${String(monday.getDate()).padStart(2, "0")}`;
+  return { todayIdx, days, week, key };
 }
 const fmtD = d => `${String(d.getDate()).padStart(2, "0")} ${MON_ABBR[d.getMonth()]}`;
 
@@ -306,7 +310,8 @@ const API_GET = (p) => fetch(p).then(r => (r.ok ? r.json() : Promise.reject(r.st
 
 // ─── Persistence — the plan must survive a reload in the aisle ──────────────
 const LS = {
-  plan:     "kg-ich-plan",
+  plan:     "kg-ich-plan",     // legacy single-week plan (migrated into plans)
+  plans:    "kg-ich-plans",    // { "<monday YYYY-MM-DD>": [recipeId…] } — this + next week
   servings: "kg-ich-servings",
   checked:  "kg-ich-checked",
   mode:     "kg-ich-mode",
@@ -523,10 +528,33 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     const m = lsRead(LS.mode, "plan");
     return MODES.some(x => x.id === m) ? m : "plan";
   });
-  const [selected, setSelected] = useState(() => {
-    const v = lsRead(LS.plan, []);
-    return Array.isArray(v) ? v.filter(x => typeof x === "string").slice(0, MAX_DINNERS) : [];
+  // Two weeks are plannable: this week (cook from) and next week (shop for on
+  // Sunday). Each week's plan lives under its Monday key; past weeks are dropped.
+  const thisWk = useMemo(() => weekInfo(0), []);
+  const nextWk = useMemo(() => weekInfo(1), []);
+  const [plans, setPlans] = useState(() => {
+    const clean = v => (Array.isArray(v) ? v.filter(x => typeof x === "string").slice(0, MAX_DINNERS) : []);
+    const raw = lsRead(LS.plans, null);
+    const out = {};
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      for (const k of [thisWk.key, nextWk.key]) if (raw[k]) out[k] = clean(raw[k]);
+    } else {
+      out[thisWk.key] = clean(lsRead(LS.plan, [])); // first boot after the 2-week change
+    }
+    return out;
   });
+  // Sunday is shopping day for next week — open there; any other day, this week.
+  const [weekOffset, setWeekOffset] = useState(() => (thisWk.todayIdx === 6 ? 1 : 0));
+  const viewWk = weekOffset === 1 ? nextWk : thisWk;
+  const selected = useMemo(() => plans[viewWk.key] || [], [plans, viewWk.key]);
+  const thisPlan = useMemo(() => plans[thisWk.key] || [], [plans, thisWk.key]);
+  const setSelected = useCallback(upd => {
+    setPlans(prev => {
+      const cur = prev[viewWk.key] || [];
+      const next = typeof upd === "function" ? upd(cur) : upd;
+      return next === cur ? prev : { ...prev, [viewWk.key]: next };
+    });
+  }, [viewWk.key]);
   const [servings, setServings] = useState(() => {
     const v = Number(lsRead(LS.servings, 2));
     return Number.isFinite(v) && v >= 1 && v <= 12 ? Math.round(v) : 2;
@@ -536,7 +564,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     return new Set(Array.isArray(v) ? v.filter(x => typeof x === "string") : []);
   });
   useEffect(() => { lsWrite(LS.mode, mode); }, [mode]);
-  useEffect(() => { lsWrite(LS.plan, selected); }, [selected]);
+  useEffect(() => { lsWrite(LS.plans, plans); }, [plans]);
   useEffect(() => { lsWrite(LS.servings, servings); }, [servings]);
   useEffect(() => { lsWrite(LS.checked, [...aisleChecked]); }, [aisleChecked]);
 
@@ -722,9 +750,14 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   // a valid saved plan, so an offline boot keeps the plan untouched.
   useEffect(() => {
     if (!loaded || source === "offline" || !recipes.length) return;
-    setSelected(prev => {
-      const next = prev.filter(id => recipes.some(r => r.id === id));
-      return next.length === prev.length ? prev : next;
+    setPlans(prev => {
+      let changed = false;
+      const out = {};
+      for (const [k, list] of Object.entries(prev)) {
+        out[k] = list.filter(id => recipes.some(r => r.id === id));
+        if (out[k].length !== list.length) changed = true;
+      }
+      return changed ? out : prev;
     });
   }, [loaded, source, recipes]);
 
@@ -812,7 +845,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     }
     setSelected(week);
     setHeroIdx(null); // let "tonight" resolve to today again
-  }, [recipes, removedIds]);
+  }, [recipes, removedIds, setSelected]);
 
   // Soft-remove a recipe card: optimistic drop, POST to persist (keep:false on its
   // corpus file), restore + a gentle note if the request fails.
@@ -1104,16 +1137,18 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
   // Week frame (MON..SUN of the current week) + the "tonight" hero slot.
   // Slot i of the plan = weekday i (MON..SUN); hero = today's slot if filled,
   // else the first filled slot; "Switch recipe" pins the next one.
-  const { todayIdx, days: weekDays, week: weekNr } = useMemo(() => weekInfo(), []);
-  const autoHero = selected[todayIdx] != null ? todayIdx : (selected.length ? 0 : -1);
-  const hIdx = heroIdx != null && heroIdx < selected.length ? heroIdx : autoHero;
-  const heroRecipe = hIdx >= 0 ? byId(selected[hIdx]) : null;
+  // The cook hero ALWAYS reads this week; plan + shop follow the viewed week.
+  const { todayIdx, days: weekDays, week: weekNr } = viewWk;
+  const thisDays = thisWk.days;
+  const autoHero = thisPlan[todayIdx] != null ? todayIdx : (thisPlan.length ? 0 : -1);
+  const hIdx = heroIdx != null && heroIdx < thisPlan.length ? heroIdx : autoHero;
+  const heroRecipe = hIdx >= 0 ? byId(thisPlan[hIdx]) : null;
   const heroT = heroRecipe ? cookTiming(heroRecipe) : null;
 
   // "Cooked it" — draw tonight's dish out of the stock, once. The slot is
   // remembered so the same dinner can't be deducted twice, and tapping again
   // puts the ingredients back (a mis-tap at the stove must be undoable).
-  const cookKey = heroRecipe && hIdx >= 0 ? `${hIdx}:${heroRecipe.id}` : null;
+  const cookKey = heroRecipe && hIdx >= 0 ? `${thisWk.key}:${hIdx}:${heroRecipe.id}` : null;
   const heroCooked = !!cookKey && cookedSlots.has(cookKey);
   function toggleCooked() {
     if (!cookKey) return;
@@ -1200,11 +1235,35 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
     );
   }
 
+  // This week / Next week pill switch — shared by the plan rail and the shop list.
+  function renderWeekSwitch() {
+    const opts = [[0, "This week", thisWk], [1, "Next week", nextWk]];
+    return (
+      <div role="tablist" aria-label="Which week" style={{ display: "flex", gap: 6, background: "#fff",
+        borderRadius: R_PILL, padding: 4, margin: "0 0 12px", boxShadow: SHADOW_SOFT }}>
+        {opts.map(([o, label, wk]) => {
+          const on = weekOffset === o;
+          const n = (plans[wk.key] || []).length;
+          return (
+            <button key={o} role="tab" aria-selected={on} className="kg-ich-btn"
+              onClick={() => { setWeekOffset(o); setHeroIdx(null); }}
+              style={{ flex: 1, border: "none", borderRadius: R_PILL, minHeight: 38, padding: "7px 10px",
+                background: on ? SAKURA : "transparent", color: on ? "#fff" : INK_SOFT,
+                fontSize: 13, fontWeight: 800 }}>
+              {label} · {fmtD(wk.days[0])}{n ? ` · ${n}/${MAX_DINNERS}` : ""}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
   // week bento rail — 7 days; phone: snap-scroll strip, desk: vertical board
   function renderWeekRail() {
     return (
         <section>
           <SecTag k="献" label="Week menu" right={`WEEK ${weekNr} · ${fmtD(weekDays[0])} - ${fmtD(weekDays[6])}`} />
+          {renderWeekSwitch()}
           {/* week randomizer — fills MON–SUN with 6 recipes (Tuesday's dish carries over to Wednesday) */}
           <button className="kg-ich-btn" onClick={shuffleWeek} disabled={!loaded || recipes.length === 0}
             aria-label="Surprise me — fill the whole week with random recipes"
@@ -1229,7 +1288,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
           </button>
           <div className="kg-ich-rail" role="list" aria-label={`Week menu with ${selected.length} of ${MAX_DINNERS} planned dinners`}>
             {weekDays.map((d, i) => {
-              const isToday = i === todayIdx;
+              const isToday = weekOffset === 0 && i === todayIdx;
               const dnum = String(d.getDate()).padStart(2, "0");
               const dayHead = (
                 <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
@@ -1266,7 +1325,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
                 <article key={i} role="listitem" className="kg-ich-day" onClick={() => setDetail(r)}
                   style={{ position: "relative", minHeight: 150, background: CARD, borderRadius: R_MD, padding: "12px 12px 10px",
                     display: "flex", flexDirection: "column", gap: 7, cursor: "pointer",
-                    boxShadow: i === hIdx ? `0 0 0 3px ${SAKURA}, ${SHADOW_SOFT}` : SHADOW_SOFT }}>
+                    boxShadow: weekOffset === 0 && i === hIdx ? `0 0 0 3px ${SAKURA}, ${SHADOW_SOFT}` : SHADOW_SOFT }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingRight: 20, color: "#C7A98F" }}>
                     <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.16em", color: isToday ? SAKURA_DP : INK_SOFT }}>
                       {DAY_ABBR[i]}{isToday ? " · TODAY" : ""}
@@ -1808,7 +1867,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
                 marginTop: 14, paddingTop: 12, borderTop: `1px solid ${LINE}` }}>
                 <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.18em", color: INK_SOFT }}>
-                  WEEK LIST · {servings}P · JUMBO GENT
+                  WEEK {weekNr} LIST · {servings}P · JUMBO GENT
                 </span>
                 <span style={{ fontSize: 14, fontWeight: 800, color: INK, fontVariantNumeric: "tabular-nums" }}>{checkedCount} / {total}</span>
               </div>
@@ -1921,7 +1980,7 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
             {cuisineOf(heroRecipe.cuisine).emoji}
           </span>
           <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: "0.26em", textTransform: "uppercase", color: SAKURA_DP, marginBottom: 8 }}>
-            今夜 · {hIdx === todayIdx ? "What's for dinner tonight" : "Planned"} · {DAY_FULL[hIdx]} {fmtD(weekDays[hIdx])}
+            今夜 · {hIdx === todayIdx ? "What's for dinner tonight" : "Planned"} · {DAY_FULL[hIdx]} {fmtD(thisDays[hIdx])}
           </div>
           <h2 className="kg-ich-title" onClick={() => setDetail(heroRecipe)}
             style={{ fontFamily: F_DISPLAY, fontSize: 22, fontWeight: 800, color: INK, lineHeight: 1.25, margin: "0 0 6px" }}>
@@ -1971,8 +2030,8 @@ export default function IchikawaSurface({ onExit, embedded = false }) {
                 fontSize: 14, fontWeight: 800, minHeight: 44, padding: "10px 18px", boxShadow: SHADOW_SOFT }}>
               ▸ Recipe card
             </button>
-            {selected.length > 1 && (
-              <button className="kg-ich-btn" onClick={() => setHeroIdx((hIdx + 1) % selected.length)}
+            {thisPlan.length > 1 && (
+              <button className="kg-ich-btn" onClick={() => setHeroIdx((hIdx + 1) % thisPlan.length)}
                 style={{ background: "#fff", border: `2px solid ${LINE}`, borderRadius: R_PILL,
                   color: INK_SOFT, fontSize: 14, fontWeight: 800, minHeight: 44, padding: "9px 16px" }}>
                 Switch recipe
